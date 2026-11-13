@@ -86,10 +86,84 @@ Sales Reports and Analytics: Provides sales charts and printable daily sales rep
 ## 6. Database Setup
 1. Open **phpMyAdmin** at (http://localhost/phpmyadmin).
 2. Create a new database named **`majestic_spring_wcdms`** 
-3. Select the `majestic_spring_wcdms` database, click the **Import** tab, choose `database/database.sql`, and click **Import** to create all relational tables (`customer`, `customer_cp_num`, `employee`, `employee_cp_num`, `container_product`, `time_slot`, `order_status`, `order_information`, `order_item`, and `payment`).
+3. Select the `majestic_spring_wcdms` database, click the **Import** tab, choose `majestic_spring_wcdms.sql`, and click **Import** to create all relational tables (`customer`, `customer_cp_num`, `employee`, `employee_cp_num`, `container_product`, `time_slot`, `order_status`, `order_information`, `order_item`, and `payment`).
 
 ## 7. Screenshots
-See Screenshots Folder
+### Admin Dashboard
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Admin Dashboard](Screenshots/Admin_Dashboard_Page.png) | ![Admin Dashboard dark mode](Screenshots/Admin_Dashboard_Page_DM.png) |
+
+### Customer Dashboard
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Customer Dashboard](Screenshots/Customer_Dashboard_Page.png) | ![Customer Dashboard dark mode](Screenshots/Customer_Dashboard_Page_DM.png) |
+
+### Customer Digital Receipt
+
+![Customer Digital Receipt](Screenshots/Customer_Digital_Reciept.png)
+
+### Daily Sales Report
+
+![Daily Sales Report](Screenshots/Daily_Sales_Report.png)
+
+### Login
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Login](Screenshots/Login_Page.png) | ![Login dark mode](Screenshots/Login_Page_DM.png) |
+
+### Manage Accounts
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Manage Accounts](Screenshots/Manage_Accounts_Page.png) | ![Manage Accounts dark mode](Screenshots/Manage_Accounts_Page_DM.png) |
+
+### Manage Batch Orders
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Manage Batch Orders](Screenshots/Manage_Batch_Orders_Page.png) | ![Manage Batch Orders dark mode](Screenshots/Manage_Batch_Orders_Page_DM.png) |
+
+### Manage Container Products
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Manage Container Products](Screenshots/Manage_Container_Products_Page.png) | ![Manage Container Products dark mode](Screenshots/Manage_Container_Products_Page_DM.png) |
+
+### Manage Order Records
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Manage Order Records](Screenshots/Manage_Order_Records_Page.png) | ![Manage Order Records dark mode](Screenshots/Manage_Order_Records_Page_DM.png) |
+
+### Order New Container
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Order New Container](Screenshots/Order_New_Container_Page.png) | ![Order New Container dark mode](Screenshots/Order_New_Container_Page_DM.png) |
+
+### Registration
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Registration](Screenshots/Registration_Page.png) | ![Registration dark mode](Screenshots/Registration_Page_DM.png) |
+
+### Submit Water Order
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Submit Water Order](Screenshots/Submit_Water_Order_Page.png) | ![Submit Water Order dark mode](Screenshots/Submit_Water_Order_Page_DM.png) |
+
+### View Order Status
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![View Order Status](Screenshots/View_Order_Status_Page.png) | ![View Order Status dark mode](Screenshots/View_Order_Status_Page_DM.png) |
+
+
 
 ## 8. Live Demo
 - **Deployed Application URL**: [http://majesticspring-wcdms.free.nf/](https://www.google.com/search?q=http://majesticspring-wcdms.free.nf/)
