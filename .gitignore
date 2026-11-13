@@ -1,0 +1,33 @@
+
+# Environment variables and private configuration
+.env
+.env.*
+!.env.example
+
+# Dependencies
+/vendor/
+/node_modules/
+
+# Logs and temporary files
+*.log
+/tmp/
+/temp/
+cache/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE and editor settings
+.idea/
+.vscode/
+
+# Local backups
+*.bak
+*.old
+*.tmp
+*.zip
+
+# Local database backups (keep the main database import SQL file)
+database/backups/
