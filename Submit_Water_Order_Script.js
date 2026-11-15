@@ -25,6 +25,11 @@
   const refillBackupPhone = document.getElementById('refillBackupPhone');
   const refillGateNote = document.getElementById('refillGateNote');
 
+  // Page Header & Notice Headings for Dynamic Refill Price Sync
+  const pageHeaderSubtitle = document.querySelector('.page-header-section p');
+  const walkinNoticeHeading = document.querySelector('.walkin-notice-group h4');
+  const pickupDeliveryHeading = document.querySelector('.pickup-delivery-group h4');
+
   // Digital Receipt Elements
   const recSlot = document.getElementById('recSlot');
   const recBrgy = document.getElementById('recBrgy');
@@ -43,14 +48,62 @@
     submitRefillForm.setAttribute('action', 'Submit_Water_Order.php');
   }
 
-  // Load records injected by db_connect5.php
+  // Load records injected by cust_db2.php
   const refillData = window.MAJESTIC_SUBMIT_REFILL_DATA || {};
   const customer = refillData.customer || null;
+  let productsList = Array.isArray(refillData.products) ? refillData.products : [];
   const slotsList = Array.isArray(refillData.slots) ? refillData.slots : [];
   const dbPreset = refillData.db_preset || null;
-  const REFILL_RATE = Number(refillData.refill_rate) || 30.0;
+  const fallbackRefillRate = Number(refillData.refill_rate) || 30.0;
 
   let activeSlotId = Number(refillData.selected_slot) || 1;
+
+  /* =========   Populate Dynamic Container Type Dropdown with Refill Prices ========== */
+  const populateRefillContainerDropdown = () => {
+    if (!refillContainerType || productsList.length === 0) return;
+    const prevSelection = refillContainerType.value;
+    refillContainerType.textContent = '';
+
+    productsList.forEach((p) => {
+      const rate = Number(p.refill_price) || fallbackRefillRate;
+      const fullName = p.container_name || p.container_type || p.product_id;
+      const opt = document.createElement('option');
+      opt.value = p.product_id;
+      opt.textContent = `${fullName} — P${rate.toFixed(2)} / Refill`;
+      opt.dataset.price = String(rate);
+      opt.dataset.name = fullName;
+      refillContainerType.appendChild(opt);
+    });
+
+    if (prevSelection) {
+      const matchOpt = Array.from(refillContainerType.options).find(
+        (o) =>
+          o.value === prevSelection ||
+          (o.dataset.name && o.dataset.name.toLowerCase() === prevSelection.toLowerCase()) ||
+          (prevSelection.toLowerCase().includes('round') && o.value === 'PRD-02') ||
+          (prevSelection.toLowerCase().includes('slim') && o.value === 'PRD-01')
+      );
+      if (matchOpt) {
+        refillContainerType.value = matchOpt.value;
+      }
+    }
+  };
+
+  const getSelectedRefillProductInfo = () => {
+    if (refillContainerType && refillContainerType.options.length > 0) {
+      const selOpt = refillContainerType.options[refillContainerType.selectedIndex] || refillContainerType.options[0];
+      return {
+        productId: selOpt.value,
+        fullName: selOpt.dataset.name || selOpt.textContent.replace(/\s*—\s*P[\d.]+\s*\/\s*Refill$/i, ''),
+        rate: Number(selOpt.dataset.price) || fallbackRefillRate
+      };
+    }
+    return {
+      productId: 'PRD-01',
+      fullName: '5-Gallon Slim Container with Faucet',
+      rate: fallbackRefillRate
+    };
+  };
 
   /* =========   light/dark images  ========== */
   const syncThemeIcon = (isDark) => {
@@ -60,7 +113,6 @@
   };
 
   /*=========   banner function  ========== */
-
   const showStatus = (message, type) => {
     if (!submitStatusBanner) return;
     submitStatusBanner.textContent = message;
@@ -89,6 +141,7 @@
       try {
         localStorage.setItem('majestic_theme', isDark ? 'dark' : 'light');
       } catch (err) {
+        // Ignore storage errors
       }
     });
   }
@@ -118,7 +171,7 @@
     });
   };
 
-  /* ===========Populate Customer Profile Defaults from MySQL ================ */
+  /* =========== Populate Customer Profile Defaults from MySQL ================ */
   if (customer) {
     if (recCustomerName) {
       recCustomerName.textContent = customer.full_name || 'Micael Masta';
@@ -148,20 +201,32 @@
     }
   }
 
-  /* ===========  Update Live Digital Receipt ================ */
+  /* ===========  Update Live Digital Receipt & Page Rate Headings ================ */
   const updateDigitalReceipt = () => {
     const qty = Math.max(1, parseInt(refillQuantity ? refillQuantity.value : '1', 10) || 1);
-    const total = qty * REFILL_RATE;
-    const cType = refillContainerType ? refillContainerType.value : '5-Gal Slim';
+    const { fullName, rate } = getSelectedRefillProductInfo();
+    const total = qty * rate;
+
     const label = (refillContainerLabel && refillContainerLabel.value.trim())
       ? refillContainerLabel.value.trim()
       : (customer?.container_label || 'Masta');
     const brgy = refillBarangay ? refillBarangay.value : 'Brgy 22';
 
+    // Update page header and walk-in/delivery rate headings so customer sees the exact refill price
+    if (pageHeaderSubtitle) {
+      pageHeaderSubtitle.textContent = `Schedule your water container refill (${fullName} — P${rate.toFixed(2)} / Container)`;
+    }
+    if (walkinNoticeHeading) {
+      walkinNoticeHeading.textContent = `Note! Station Walk-In Refill (P${rate.toFixed(2)})`;
+    }
+    if (pickupDeliveryHeading) {
+      pickupDeliveryHeading.textContent = `Pickup & Delivery (P${rate.toFixed(2)})`;
+    }
+
     if (recBrgy) recBrgy.textContent = brgy;
     if (recLabel) recLabel.textContent = label;
-    if (recContainerSelected) recContainerSelected.textContent = `${qty}x ${cType} Refill`;
-    if (recRate) recRate.textContent = `P${REFILL_RATE.toFixed(2)}`;
+    if (recContainerSelected) recContainerSelected.textContent = `${qty}x ${fullName} Refill`;
+    if (recRate) recRate.textContent = `P${rate.toFixed(2)}`;
     if (recQuantity) recQuantity.textContent = String(qty);
     if (recTotalPayable) recTotalPayable.textContent = `P${total.toFixed(2)}`;
 
@@ -192,10 +257,12 @@
   /* =========== Save & Load Usual Refill Preset ================ */
   if (btnSavePreset) {
     btnSavePreset.addEventListener('click', () => {
+      const { productId, fullName } = getSelectedRefillProductInfo();
       const preset = {
         slot_id: String(activeSlotId),
         slot_label: recSlot ? recSlot.textContent : '8:00 AM - 10:00 AM',
-        container_type: refillContainerType ? refillContainerType.value : '5-Gal Slim',
+        container_type: productId,
+        container_name: fullName,
         quantity: refillQuantity ? refillQuantity.value : '1',
         container_label: refillContainerLabel ? refillContainerLabel.value.trim() : '',
         barangay: refillBarangay ? refillBarangay.value : 'Brgy 22',
@@ -206,7 +273,7 @@
       };
       try {
         localStorage.setItem('majestic_refill_preset', JSON.stringify(preset));
-        showStatus('Saved as your Usual Refill Preset!', 'success');
+        showStatus(`Saved "${fullName}" as your Usual Refill Preset!`, 'success');
       } catch (err) {
         showStatus('Could not save preset to browser storage.', 'error');
       }
@@ -234,7 +301,19 @@
         return;
       }
 
-      if (refillContainerType) refillContainerType.value = preset.container_type || '5-Gal Slim';
+      if (refillContainerType && preset.container_type) {
+        const targetVal = String(preset.container_type);
+        const matchOpt = Array.from(refillContainerType.options).find(
+          (o) =>
+            o.value === targetVal ||
+            (o.dataset.name && o.dataset.name.toLowerCase() === targetVal.toLowerCase()) ||
+            (targetVal.toLowerCase().includes('round') && o.value === 'PRD-02') ||
+            (targetVal.toLowerCase().includes('slim') && o.value === 'PRD-01')
+        );
+        if (matchOpt) {
+          refillContainerType.value = matchOpt.value;
+        }
+      }
       if (refillQuantity) refillQuantity.value = String(preset.quantity || 1);
       if (refillContainerLabel) refillContainerLabel.value = preset.container_label || '';
       if (refillBarangay && preset.barangay) refillBarangay.value = preset.barangay;
@@ -275,10 +354,11 @@
     });
   }
 
+  populateRefillContainerDropdown();
   syncBatchSlotsUI();
   updateDigitalReceipt();
 
-/* =========== Live Batch Slot Availability via Fetch API =========== */
+  /* =========== Live Batch Slot & Product Pricing Availability via Fetch API =========== */
   const fetchLiveBatchSlots = async () => {
     try {
       const response = await fetch('Submit_Water_Order.php?ajax_slots=1', {
@@ -292,13 +372,20 @@
       }
 
       const data = await response.json();
-      if (data.status === 'ok' && Array.isArray(data.slots)) {
-        data.slots.forEach((slot) => {
-          const spanEl = document.getElementById(`slotCountText${slot.slot_id}`);
-          if (spanEl && slot.pill_subtext) {
-            spanEl.textContent = slot.pill_subtext;
-          }
-        });
+      if (data.status === 'ok') {
+        if (Array.isArray(data.slots)) {
+          data.slots.forEach((slot) => {
+            const spanEl = document.getElementById(`slotCountText${slot.slot_id}`);
+            if (spanEl && slot.pill_subtext) {
+              spanEl.textContent = slot.pill_subtext;
+            }
+          });
+        }
+        if (Array.isArray(data.products) && data.products.length > 0) {
+          productsList = data.products;
+          populateRefillContainerDropdown();
+          updateDigitalReceipt();
+        }
       }
     } catch (error) {
       console.warn('Unable to refresh batch slots via Fetch API:', error);

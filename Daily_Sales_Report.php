@@ -323,14 +323,14 @@ $chartConfigJson = json_encode([
     <!--Primary Visualizations -->
     <div class="charts-grid">
       <div class="chart-box">
-        <h3>1. Daily Sales Chart by 2-Hour Time Batch (Chart.js — Paid Cash vs. Unpaid/Utang)</h3>
+        <h3>1. Daily Sales Chart by 2-Hour Time Batch (Paid Cash vs. Unpaid/Utang)</h3>
         <div class="report-canvas-wrap">
           <canvas id="reportBatchBarChart"></canvas>
         </div>
       </div>
-
+R
       <div class="chart-box">
-        <h3>2. Orders &amp; Revenue Distribution by Barangay (Chart.js)</h3>
+        <h3>2. Orders &amp; Revenue Distribution by Barangay</h3>
         <div class="pie-layout">
           <div class="pie-canvas-wrap">
             <canvas id="reportBrgyPieChart"></canvas>

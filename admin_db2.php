@@ -25,6 +25,8 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
     ]);
+
+    $pdo->exec("SET time_zone = '+08:00'");
 } catch (PDOException $e) {
     die('Database Connection Error: ' . htmlspecialchars($e->getMessage()));
 }
@@ -54,6 +56,14 @@ if (strcasecmp((string)$empAuthRow['emp_status'], 'Inactive') === 0) {
 }
 
 $currentPageName = strtolower(basename($_SERVER['PHP_SELF'] ?? ''));
+
+/* =========   CSRF PROTECTION (all POST forms on these pages)   ========= */
+require_once __DIR__ . '/csrf_helper.php';
+majesticCsrfCheck();
+$majesticCsrf = majesticCsrfToken();
+if (!isset($_GET['ajax_dashboard'])) {
+    ob_start(static fn(string $html): string => majesticCsrfInject($html, $majesticCsrf));
+}
 
 /* ===============================================
    PAGE 1: ADMIN DASHBOARD (Admin_Dashboard.php)
@@ -415,7 +425,7 @@ if ($currentPageName === 'accounts.php') {
                                     ':street' => $streetName,
                                     ':brgy'   => $barangay,
                                     ':email'  => $emailAddress,
-                                    ':phash'  => $password,
+                                    ':phash'  => $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : '',
                                     ':gate'   => $gateRiderNote !== '' ? $gateRiderNote : null,
                                     ':st'     => $status
                                 ]);
@@ -443,7 +453,7 @@ if ($currentPageName === 'accounts.php') {
                                     ':street' => $streetName,
                                     ':brgy'   => $barangay,
                                     ':email'  => $emailAddress,
-                                    ':phash'  => $password,
+                                    ':phash'  => $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : '',
                                     ':gate'   => $gateRiderNote !== '' ? $gateRiderNote : null,
                                     ':st'     => $status,
                                     ':cid'    => $targetId
@@ -490,7 +500,7 @@ if ($currentPageName === 'accounts.php') {
                                     ':street' => $streetName,
                                     ':brgy'   => $barangay,
                                     ':email'  => $emailAddress,
-                                    ':phash'  => $password,
+                                    ':phash'  => $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : '',
                                     ':role'   => $validEmpRole,
                                     ':st'     => $status
                                 ]);
@@ -516,7 +526,7 @@ if ($currentPageName === 'accounts.php') {
                                     ':street' => $streetName,
                                     ':brgy'   => $barangay,
                                     ':email'  => $emailAddress,
-                                    ':phash'  => $password,
+                                    ':phash'  => $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : '',
                                     ':role'   => $validEmpRole,
                                     ':st'     => $status,
                                     ':eid'    => $targetId
@@ -538,7 +548,8 @@ if ($currentPageName === 'accounts.php') {
                         if ($pdo->inTransaction()) {
                             $pdo->rollBack();
                         }
-                        $setAccountStatus('Database Error: ' . $e->getMessage());
+                        error_log('WCDMS error: ' . $e->getMessage());
+                        $setAccountStatus('Database Error: Unable to save your changes right now. Please try again.');
                     }
                 }
             }
@@ -594,7 +605,7 @@ if ($currentPageName === 'accounts.php') {
             'backup_phone'    => (string)($phones[1] ?? ''),
             'gate_rider_note' => '',
             'status'          => (string)$emp['emp_status'],
-            'password'        => (strpos((string)$emp['password_hash'], '$2') === 0) ? 'admin12345' : (string)$emp['password_hash']
+            'password'        => ''
         ];
         $staffAccountsCount++;
     }
@@ -630,19 +641,19 @@ if ($currentPageName === 'accounts.php') {
             'backup_phone'    => $backupPh,
             'gate_rider_note' => (string)($cust['gate_rider_note'] ?? ''),
             'status'          => (string)$cust['cust_status'],
-            'password'        => (strpos((string)$cust['password_hash'], '$2') === 0) ? 'customer123' : (string)$cust['password_hash']
+            'password'        => ''
         ];
         $customerAccountsCount++;
     }
 
     $totalAccountsCount = $staffAccountsCount + $customerAccountsCount;
-    $accountsListJson   = json_encode($allAccounts, JSON_UNESCAPED_UNICODE) ?: '[]';
+    $accountsListJson   = json_encode($allAccounts, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?: '[]';
 
     echo "<script>\n";
     echo "  window.MAJESTIC_ACCOUNTS_DATA = " . $accountsListJson . ";\n";
     echo "  window.MAJESTIC_ACCOUNTS_FLASH = " . json_encode([
         'message' => $accountStatusMessage,
         'type'    => $accountStatusType
-    ], JSON_UNESCAPED_UNICODE) . ";\n";
+    ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) . ";\n";
     echo "</script>\n";
 }

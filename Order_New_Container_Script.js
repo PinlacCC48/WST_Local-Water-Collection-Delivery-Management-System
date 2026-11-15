@@ -1,4 +1,3 @@
-
 document.addEventListener("DOMContentLoaded", () => {
   // Theme Toggle
   const themeToggleBtn = document.getElementById("themeToggleBtn");
@@ -24,21 +23,19 @@ document.addEventListener("DOMContentLoaded", () => {
       try {
         localStorage.setItem("majestic_theme", nextDark ? "dark" : "light");
       } catch (err) {
-      
+        // Ignore storage error
       }
       applyTheme(nextDark);
     });
   }
 
-/* =========   ELEMENT REFERENCES  ========== */
+  /* =========   ELEMENT REFERENCES  ========== */
   const orderContainerForm = document.getElementById("orderContainerForm");
   const selectedContainerInput = document.getElementById("selectedContainerInput");
-  const cardSlimContainer = document.getElementById("cardSlimContainer");
-  const cardRoundContainer = document.getElementById("cardRoundContainer");
-  const btnSelectSlim = document.getElementById("btnSelectSlim");
-  const btnSelectRound = document.getElementById("btnSelectRound");
-  const priceTextSlim = document.getElementById("priceTextSlim");
-  const priceTextRound = document.getElementById("priceTextRound");
+  const containerCardsGrid = document.querySelector(".container-cards-grid");
+  const pageHeaderHeading = document.querySelector(".page-header-titles h2");
+  const pageHeaderSubtitle = document.querySelector(".page-header-titles p");
+  const stepOneHeading = document.querySelector(".step-section .step-heading");
 
   const waterRefillOptionSelect = document.getElementById("waterRefillOptionSelect");
   const batchSlotSelect = document.getElementById("batchSlotSelect");
@@ -50,7 +47,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const serviceModeSelect = document.getElementById("serviceModeSelect");
   const gateRiderNoteInput = document.getElementById("gateRiderNoteInput");
 
-/* =========   ELEMENT REFERENCES for reciept ========== */
+  /* =========   ELEMENT REFERENCES for receipt ========== */
   const receiptItemSelected = document.getElementById("receiptItemSelected");
   const receiptContainerPrice = document.getElementById("receiptContainerPrice");
   const receiptWaterRefill = document.getElementById("receiptWaterRefill");
@@ -68,31 +65,97 @@ document.addEventListener("DOMContentLoaded", () => {
     orderContainerForm.setAttribute("action", "Order_New_Container.php");
   }
 
-  // Load records injected by db_connect6.php
+  // Load records injected by cust_db2.php
   const pageData = window.MAJESTIC_NEW_CONTAINER_DATA || {};
   const customer = pageData.customer || null;
-  const products = Array.isArray(pageData.products) ? pageData.products : [];
+  const products = Array.isArray(pageData.products) && pageData.products.length > 0
+    ? pageData.products
+    : [
+        {
+          product_id: "PRD-01",
+          container_name: "5-Gallon Slim Container with Faucet",
+          container_type: "5-Gal - Slim",
+          capacity_gallons: 5,
+          refill_price: 30,
+          new_container_price: 250,
+          available_stock: 20,
+          availability_status: "Available"
+        },
+        {
+          product_id: "PRD-02",
+          container_name: "5-Gallon Round Dispenser Bottle",
+          container_type: "5-Gal - Round",
+          capacity_gallons: 5,
+          refill_price: 30,
+          new_container_price: 250,
+          available_stock: 20,
+          availability_status: "Available"
+        }
+      ];
   const slotsList = Array.isArray(pageData.slots) ? pageData.slots : [];
 
-  const slimProd = products.find((p) => p.product_id === "PRD-01") || null;
-  const roundProd = products.find((p) => p.product_id === "PRD-02") || null;
+  let selectedProductId = products[0].product_id;
 
-  const getPricesForType = (typeStr) => {
-    const isRound = typeStr.toLowerCase().includes("round");
-    const prod = isRound ? roundProd : slimProd;
-    return {
-      containerPrice: prod ? parseFloat(prod.new_container_price) || 250 : 250,
-      refillPrice: prod ? parseFloat(prod.refill_price) || 30 : 30,
-      stock: prod ? parseInt(prod.available_stock, 10) : 20
-    };
+  const getSelectedProduct = () => {
+    return (
+      products.find(
+        (p) =>
+          p.product_id === selectedProductId ||
+          p.container_name === selectedProductId ||
+          p.container_type === selectedProductId
+      ) || products[0]
+    );
   };
 
-  if (priceTextSlim && slimProd) {
-    priceTextSlim.textContent = `P${Number(slimProd.new_container_price).toFixed(2)} / Container`;
-  }
-  if (priceTextRound && roundProd) {
-    priceTextRound.textContent = `P${Number(roundProd.new_container_price).toFixed(2)} / Container`;
-  }
+  /* =========   Render All Container Cards Dynamically from container_product ========== */
+  const renderContainerCards = () => {
+    if (!containerCardsGrid) return;
+    containerCardsGrid.textContent = "";
+
+    products.forEach((prod) => {
+      const pid = prod.product_id;
+      const fullName = prod.container_name || prod.container_type || pid;
+      const newPrice = Number(prod.new_container_price) || 250;
+      const refillPrice = Number(prod.refill_price) || 30;
+      const stock = Number(prod.available_stock) || 0;
+      const isOutOfStock = stock <= 0 || String(prod.availability_status || "").toLowerCase() === "out of stock";
+      const isSelected = pid === selectedProductId;
+
+      const card = document.createElement("div");
+      card.className = `container-choice-card${isSelected ? " selected" : ""}`;
+      card.dataset.productId = pid;
+
+      const titleEl = document.createElement("h5");
+      titleEl.className = "container-card-title";
+      titleEl.textContent = fullName;
+
+      const priceEl = document.createElement("div");
+      priceEl.className = "container-card-price";
+      priceEl.textContent = `P${newPrice.toFixed(2)} / Container`;
+
+      const descEl = document.createElement("p");
+      descEl.className = "container-card-desc";
+      const noteText = prod.inspection_note
+        ? prod.inspection_note
+        : `Brand-new ${prod.capacity_gallons || 5}-Gallon (${prod.container_type || "Standard"})`;
+      descEl.textContent = `${noteText} | Refill: +P${refillPrice.toFixed(2)} | Stock: ${stock} (${isOutOfStock ? "Out of Stock" : "Available"})`;
+
+      const btnEl = document.createElement("button");
+      btnEl.type = "button";
+      btnEl.className = `btn-select-container${isSelected ? " active" : ""}`;
+      btnEl.textContent = isOutOfStock ? "Out of Stock" : (isSelected ? `Selected: ${fullName}` : `Select ${fullName}`);
+
+      card.addEventListener("click", () => {
+        selectedProductId = pid;
+        if (selectedContainerInput) selectedContainerInput.value = pid;
+        renderContainerCards();
+        updateDigitalReceipt();
+      });
+
+      card.append(titleEl, priceEl, descEl, btnEl);
+      containerCardsGrid.appendChild(card);
+    });
+  };
 
   const showFeedback = (msg, isError = false) => {
     if (!orderFeedbackMsg) return;
@@ -154,16 +217,42 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Live Digital Receipt Sync
+  // Live Digital Receipt & Refill Option Price Sync
   const updateDigitalReceipt = () => {
-    const selectedType = selectedContainerInput ? selectedContainerInput.value : "5-Gal - Slim";
-    const { containerPrice, refillPrice } = getPricesForType(selectedType);
+    const prod = getSelectedProduct();
+    const fullName = prod.container_name || prod.container_type || prod.product_id;
+    const containerPrice = Number(prod.new_container_price) || 250;
+    const refillPrice = Number(prod.refill_price) || 30;
+
+    if (selectedContainerInput) {
+      selectedContainerInput.value = prod.product_id;
+    }
+
+    // Dynamically update the Water Refill Option dropdown text with the selected container's live refill price
+    if (waterRefillOptionSelect && waterRefillOptionSelect.options.length > 0) {
+      const withRefillOpt = Array.from(waterRefillOptionSelect.options).find((o) => o.value === "With Refill");
+      if (withRefillOpt) {
+        withRefillOpt.textContent = `Include Initial Water Refill (+P${refillPrice.toFixed(2)})`;
+      }
+    }
+
+    // Update page header subtitle with live container & refill price
+    if (pageHeaderHeading) {
+      pageHeaderHeading.textContent = "Order Brand-New Water Container from the Station";
+    }
+    if (pageHeaderSubtitle) {
+      pageHeaderSubtitle.textContent = `Selected: ${fullName} (P${containerPrice.toFixed(2)}) with optional initial water refill (+P${refillPrice.toFixed(2)})`;
+    }
+    if (stepOneHeading) {
+      stepOneHeading.textContent = `1. Select Brand-New Water Container Type (${products.length} Available Options)`;
+    }
+
     const withRefill = waterRefillOptionSelect && waterRefillOptionSelect.value === "With Refill";
     const refillAddon = withRefill ? refillPrice : 0;
     const totalPayable = containerPrice + refillAddon;
 
     if (receiptItemSelected) {
-      receiptItemSelected.textContent = `1x New ${selectedType} Container`;
+      receiptItemSelected.textContent = `1x New ${fullName}`;
     }
     if (receiptContainerPrice) {
       receiptContainerPrice.textContent = `P${containerPrice.toFixed(2)}`;
@@ -197,30 +286,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
-  // Container Choice Card Selection
-  const selectContainerCard = (type) => {
-    if (selectedContainerInput) selectedContainerInput.value = type;
-    if (type === "5-Gal - Slim") {
-      if (cardSlimContainer) cardSlimContainer.classList.add("selected");
-      if (cardRoundContainer) cardRoundContainer.classList.remove("selected");
-      if (btnSelectSlim) btnSelectSlim.classList.add("active");
-      if (btnSelectRound) btnSelectRound.classList.remove("active");
-    } else {
-      if (cardRoundContainer) cardRoundContainer.classList.add("selected");
-      if (cardSlimContainer) cardSlimContainer.classList.remove("selected");
-      if (btnSelectRound) btnSelectRound.classList.add("active");
-      if (btnSelectSlim) btnSelectSlim.classList.remove("active");
-    }
-    updateDigitalReceipt();
-  };
-
-  if (cardSlimContainer) {
-    cardSlimContainer.addEventListener("click", () => selectContainerCard("5-Gal - Slim"));
-  }
-  if (cardRoundContainer) {
-    cardRoundContainer.addEventListener("click", () => selectContainerCard("5-Gal - Round"));
-  }
-
   [
     waterRefillOptionSelect,
     batchSlotSelect,
@@ -238,7 +303,10 @@ document.addEventListener("DOMContentLoaded", () => {
     btnResetSelection.addEventListener("click", () => {
       if (orderContainerForm) orderContainerForm.reset();
       populateCustomerDefaults();
-      selectContainerCard("5-Gal - Slim");
+      selectedProductId = products[0].product_id;
+      if (selectedContainerInput) selectedContainerInput.value = selectedProductId;
+      renderContainerCards();
+      updateDigitalReceipt();
       if (orderFeedbackMsg) orderFeedbackMsg.hidden = true;
     });
   }
@@ -260,5 +328,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  renderContainerCards();
   updateDigitalReceipt();
 });

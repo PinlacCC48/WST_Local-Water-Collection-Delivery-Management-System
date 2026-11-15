@@ -52,25 +52,7 @@
       overviewDateHeading.textContent = `Station Operation Overview - Today (${formattedDate})`;
     }
 
-    // Determine active batch window based on current hour (8:00 AM - 6:00 PM)
-    if (kpiActiveBatchTime) {
-      const hour = now.getHours();
-      let activeLabel = 'Station is Closed';
-
-      if (hour >= 8 && hour < 10) {
-        activeLabel = '8:00 AM - 10:00 AM';
-      } else if (hour >= 10 && hour < 12) {
-        activeLabel = '10:00 AM - 12:00 PM';
-      } else if (hour >= 12 && hour < 14) {
-        activeLabel = '12:00 PM - 2:00 PM';
-      } else if (hour >= 14 && hour < 16) {
-        activeLabel = '2:00 PM - 4:00 PM';
-      } else if (hour >= 16 && hour < 18) {
-        activeLabel = '4:00 PM - 6:00 PM';
-      }
-
-      kpiActiveBatchTime.textContent = activeLabel;
-    }
+    // The active batch label now comes from the server
   };
 
   syncDateAndBatchWindow();

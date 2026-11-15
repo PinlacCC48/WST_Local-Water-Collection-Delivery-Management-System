@@ -24,6 +24,7 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
     ]);
+$pdo->exec("SET time_zone = '+08:00'");
 } catch (PDOException $e) {
     die('Database Connection Error: ' . htmlspecialchars($e->getMessage()));
 }
@@ -50,6 +51,14 @@ if (strcasecmp((string)$empAuthRow['emp_status'], 'Inactive') === 0) {
     session_destroy();
     header('Location: Login.php?inactive=1');
     exit;
+}
+
+/* =========   CSRF PROTECTION (all POST forms on these pages)   ========= */
+require_once __DIR__ . '/csrf_helper.php';
+majesticCsrfCheck();
+$majesticCsrf = majesticCsrfToken();
+if (true) {
+    ob_start(static fn(string $html): string => majesticCsrfInject($html, $majesticCsrf));
 }
 
 /* ==============================================
@@ -83,9 +92,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $inspectionNote    = trim((string)($_POST['inspection_note'] ?? ''));
     $availabilityRaw   = trim((string)($_POST['availability_status'] ?? 'Available'));
 
-    $containerType = (stripos($containerTypeRaw, 'Round') !== false)
-        ? '5-Gal - Round'
-        : '5-Gal - Slim';
+    if (stripos($containerTypeRaw, 'Other') !== false) {
+        $containerType = 'Other';
+    } elseif (stripos($containerTypeRaw, 'Round') !== false) {
+        $containerType = '5-Gal - Round';
+    } else {
+        $containerType = '5-Gal - Slim';
+    }
 
     $availabilityStatus = ($availabilityRaw === 'Out of Stock' || $availableStock <= 0)
         ? 'Out of Stock'
@@ -107,6 +120,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($formAction === 'save') {
         if ($containerTypeRaw === '' || $containerName === '' || $capacityGallons <= 0) {
             $setProductStatus('Incomplete Form: Please fill out Container Type, Container Name, Pricing, and Available Stocks.');
+        } elseif ($refillPrice < 0 || $newContainerPrice < 0 || $availableStock < 0) {
+            $setProductStatus('Invalid Value: Prices and Available Stock cannot be negative.');
         } else {
             try {
                 $isNewProd = ($productId === '' || $productId === 'ID-#');
@@ -161,7 +176,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Location: Container_Products.php?saved=' . urlencode($targetProdId));
                 exit;
             } catch (Throwable $e) {
-                $setProductStatus('Database Error: ' . $e->getMessage());
+                error_log('WCDMS error: ' . $e->getMessage());
+                $setProductStatus('Database Error: Unable to save your changes right now. Please try again.');
             }
         }
     }
@@ -186,12 +202,12 @@ foreach ($prodRows as $pr) {
 }
 
 $totalProductsCount = count($productsArray);
-$productsListJson   = json_encode($productsArray, JSON_UNESCAPED_UNICODE) ?: '[]';
+$productsListJson   = json_encode($productsArray, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?: '[]';
 
 echo "<script>\n";
 echo "  window.MAJESTIC_PRODUCTS_DATA = " . $productsListJson . ";\n";
 echo "  window.MAJESTIC_PRODUCTS_FLASH = " . json_encode([
     'message' => $productStatusMessage,
     'type'    => $productStatusType
-], JSON_UNESCAPED_UNICODE) . ";\n";
+], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) . ";\n";
 echo "</script>\n";

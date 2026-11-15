@@ -1,11 +1,3 @@
-/**
- * Batch_Orders_Script.js
- * Streamlined Controller for Batch_Orders.php
- * Includes:
- *   - Priority Walk-In Row Highlight & ★ PRIORITY WALK-IN Badge
- *   - Carried-Over Rescheduled & Pending Order Badges
- *   - Active Queued Containers vs Total Batch Orders Counter
- */
 (() => {
   const body = document.body;
   const themeToggleBtn = document.getElementById('themeToggleBtn');
@@ -85,11 +77,11 @@
     productsList.forEach((p) => {
       const rPrice = Number(p.refill_price) || 0;
       const nPrice = Number(p.new_container_price) || 0;
-      const labelBase = p.container_type || p.container_name || p.product_id;
+      const labelBase = p.container_name || p.container_type || p.product_id;
 
       [
         { val: `REFILL|${p.product_id}`, text: `${labelBase} — Refill Only (P${rPrice.toFixed(2)})`, price: rPrice },
-        { val: `NEW|${p.product_id}`, text: `${labelBase} — New Container Only (P${nPrice.toFixed(2)})`, price: nPrice },
+        { val: `NEW|${p.product_id}`, text: `${labelBase} — New / Replacement Container (P${nPrice.toFixed(2)})`, price: nPrice },
         { val: `NEW-REFILL|${p.product_id}`, text: `${labelBase} — New Container + Refill (P${(nPrice + rPrice).toFixed(2)})`, price: nPrice + rPrice }
       ].forEach((o) => {
         const opt = document.createElement('option');
@@ -114,7 +106,7 @@
   let activeSlotId = Number(batchData.selected_slot) || 1;
   let selectedOrderId = null;
 
-  /* =========   HELPER FUNCTIONS  ========== */
+  /* =========   light and dark mode images  ========== */
   const syncThemeIcon = (isDark) => {
     if (!themeToggleImg) return;
     themeToggleImg.src = isDark ? 'Darkmode_Pic.png' : 'Lightmode_Pic.png';
@@ -136,7 +128,7 @@
     showStatus(batchData.flash.message, batchData.flash.type || 'success');
   }
 
-  /* =========== 1. Theme Initialization & Toggle ================ */
+  /* =========== Theme Toggle ================ */
   try {
     const isDark = localStorage.getItem('majestic_theme') === 'dark';
     body.classList.toggle('dark-mode', isDark);
@@ -158,7 +150,7 @@
     });
   }
 
-  /* =========== 2. Populate Delivery Rider Dropdown & Price Calculator ================ */
+  /* =========== Populate Delivery Rider Dropdown & Price Calculator ================ */
   if (orderRiderSelect && employeesList.length > 0) {
     orderRiderSelect.textContent = '';
     employeesList.forEach((emp) => {
@@ -207,7 +199,7 @@
     });
   }
 
-  /* =========== 3. Auto-Fill Customer Details ================ */
+  /* =========== Auto-Fill Customer Details ================ */
   const tryAutoFillCustomer = (value) => {
     const q = value.trim().toLowerCase();
     if (!q || (orderIdBadge && orderIdBadge.value !== 'ORD-#')) return;
@@ -235,7 +227,7 @@
   if (orderCustomerName) orderCustomerName.addEventListener('blur', () => tryAutoFillCustomer(orderCustomerName.value));
   if (orderContainerLabel) orderContainerLabel.addEventListener('blur', () => tryAutoFillCustomer(orderContainerLabel.value));
 
-  /* =========== 4. Form Reset & Row Population ================ */
+  /* =========== Form Reset & Row Population ================ */
   const clearTableSelection = () => {
     if (!batchTableBody) return;
     batchTableBody.querySelectorAll('tr.selected-row').forEach((r) => r.classList.remove('selected-row'));
@@ -288,7 +280,7 @@
     if (orderSlotSelect) orderSlotSelect.value = String(ord.slot_id || activeSlotId);
     if (orderRiderSelect && ord.employee_id) orderRiderSelect.value = ord.employee_id;
     if (orderInspectionSelect) orderInspectionSelect.value = ord.inspection_status || 'Good';
-    if (orderProductSelect) orderProductSelect.value = ord.product_select || 'PID-2';
+    if (orderProductSelect) orderProductSelect.value = ord.product_select || 'REFILL|PRD-01';
     if (orderQuantity) orderQuantity.value = String(ord.quantity || 1);
     if (orderTotalPriceText) orderTotalPriceText.textContent = `P${Number(ord.total_price).toFixed(2)}`;
     if (orderManualTotalInput) orderManualTotalInput.value = Number(ord.total_price).toFixed(2);
@@ -371,7 +363,7 @@
     });
   }
 
-  /* =========== 6. Render Active Batch Queue Table ================ */
+  /* =========== Render Active Batch Queue Table ================ */
   const statusOptions = [
     { id: '1', label: 'Queued' },
     { id: '2', label: 'Empty Picked Up' },
@@ -425,7 +417,7 @@
         return td;
       };
 
-      // 1. Order ID Cell (+ Priority Walk-In Badge if Walk-In)
+      //  Order ID Cell (Priority Walk-In Badge if Walk-In)
       const tdId = document.createElement('td');
       const idStrong = document.createElement('div');
       idStrong.textContent = ord.order_id;
@@ -438,7 +430,7 @@
         tdId.appendChild(walkinBadge);
       }
 
-      // 2. Tag & Phone# Cell
+      // Tag & Phone# Cell
       const tdTagPhone = document.createElement('td');
       tdTagPhone.className = 'tag-phone-cell';
       const lineTag = document.createElement('div');
@@ -454,7 +446,7 @@
         tdTagPhone.appendChild(linePhone2);
       }
 
-      // 5. Order Status Cell
+      // Order Status Cell
       const tdStatus = document.createElement('td');
       const statusSelect = document.createElement('select');
       statusSelect.className = 'table-status-select';
@@ -533,7 +525,9 @@
       batchTableBody.appendChild(tr);
     });
 
-    if (overdueCountInSlot > 0 && (!batchData.flash || !batchData.flash.message)) {
+    const bannerText = batchStatusBanner ? batchStatusBanner.textContent : '';
+    const bannerFree = !bannerText || bannerText.startsWith('Action Required');
+    if (overdueCountInSlot > 0 && bannerFree && (!batchData.flash || !batchData.flash.message)) {
       showStatus(
         `Action Required: ${overdueCountInSlot} order(s) in this batch have passed their scheduled time window without being marked Delivered, Rescheduled, or Cancelled. Please update their status.`,
         'error'
@@ -541,7 +535,7 @@
     }
   };
 
-  /* =========== 7. Bulk Status, Slot Switching, Search & Form Validation ================ */
+  /* =========== Bulk Status, Slot Switching, Search & Form Validation ================ */
   if (bulkStatusSelect) {
     bulkStatusSelect.addEventListener('change', () => {
       const val = bulkStatusSelect.value;
@@ -638,4 +632,35 @@
   if (orderSlotSelect) orderSlotSelect.value = String(activeSlotId);
   syncSlotButtonsAndHeader();
   renderBatchQueueTable();
+
+  /* =========== Live Batch Queue Auto-Refresh via Fetch API =========== */
+  const fetchLiveBatchQueue = async () => {
+    try {
+      const response = await fetch('Batch_Orders.php?ajax_batch=1', {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const freshData = await response.json();
+      if (freshData.status !== 'ok') return;
+
+      if (Array.isArray(freshData.slots)) slotsList.splice(0, slotsList.length, ...freshData.slots);
+      if (Array.isArray(freshData.orders)) allOrders.splice(0, allOrders.length, ...freshData.orders);
+      if (Array.isArray(freshData.customers)) customersLookup.splice(0, customersLookup.length, ...freshData.customers);
+      if (Array.isArray(freshData.products)) {
+        productsList.splice(0, productsList.length, ...freshData.products);
+        populateProductOptions();
+        updateComputedPrice();
+      }
+
+      syncSlotButtonsAndHeader();
+      renderBatchQueueTable();
+    } catch (error) {
+      console.warn('Unable to refresh Batch Queue via Fetch API:', error);
+    }
+  };
+
+  setInterval(fetchLiveBatchQueue, 15000);
 })();

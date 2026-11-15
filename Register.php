@@ -62,7 +62,8 @@
 
     
       <form id="registerForm" method="POST" action="Register.php" novalidate>
-        <input type="hidden" name="csrf_token" value="majestic_csrf_token_2026" />
+        <!-- CSRF Token -->
+      <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>" />
 
         <!--=========================Box 1: Customer Name & Gallon Tag=========================-->
         <div class="group-box">

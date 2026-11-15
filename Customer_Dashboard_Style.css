@@ -548,7 +548,6 @@ body.dark-mode .slot-pill.active {
 }
 
 
-/* =========== MOBILE DEVICES STYLING  ========== */
 /* =========== MOBILE DEVICES STYLING ========== */
 @media screen and (max-width: 1024px) {
   .customer-cards-grid {
@@ -568,12 +567,38 @@ body.dark-mode .slot-pill.active {
     padding-left: 1.25rem;
     padding-right: 1.25rem;
   }
+
+  /* Stack the navbar below the brand on tablet and mobile screens. */
+  .top-navbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  /* Keep navigation links in two columns, with Log Out spanning both. */
+  .nav-right {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 0.65rem;
+  }
+
+  .nav-pill-btn {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .nav-right .nav-pill-btn:last-child {
+    grid-column: 1 / -1;
+  }
+
   .stepper-stages-grid {
     grid-template-columns: 1fr;
   }
+
   .slots-pill-buttons-row {
     grid-template-columns: 1fr 1fr;
   }
+
   .btn-repeat-order {
     width: 100%;
     height: auto;
@@ -586,17 +611,15 @@ body.dark-mode .slot-pill.active {
 }
 
 @media screen and (max-width: 480px) {
-  .top-navbar {
-    flex-direction: column;
-    align-items: flex-start;
-  }
+  /* Use a single navigation column on narrow phones. */
   .nav-right {
-    width: 100%;
+    grid-template-columns: 1fr;
   }
-  .nav-pill-btn {
-    flex: 1 1 100%;
-    min-width: 0;
+
+  .nav-right .nav-pill-btn:last-child {
+    grid-column: auto;
   }
+
   .slots-pill-buttons-row {
     grid-template-columns: 1fr;
   }

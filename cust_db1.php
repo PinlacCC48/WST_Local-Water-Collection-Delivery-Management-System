@@ -1,6 +1,6 @@
 <?php
 /*======================
- Database Connectionfor 
+ Database Connection for 
  Customer_Dashboard.php
  ========================*/
 declare(strict_types=1);
@@ -9,6 +9,10 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 date_default_timezone_set('Asia/Manila');
+
+require_once __DIR__ . '/csrf_helper.php';
+majesticCsrfCheck();
+$majesticCsrf = majesticCsrfToken();
 
 $DB_HOST = '127.0.0.1';
 $DB_NAME = 'majestic_spring_wcdms';
@@ -26,11 +30,12 @@ try {
             PDO::ATTR_EMULATE_PREPARES   => false,
         ]
     );
+    $pdo->exec("SET time_zone = '+08:00'");
 } catch (PDOException $e) {
     die("Database Connection Failed: " . htmlspecialchars($e->getMessage()));
 }
 
-//  Logged-In Customer Resolution & Active Status Guard
+// Logged-In Customer Resolution & Active Status Guard
 $customer_id = $_SESSION['user']['customer_id'] ?? $_SESSION['customer_id'] ?? null;
 if (!$customer_id && !empty($_SESSION['user_id']) && strpos((string)$_SESSION['user_id'], 'CUS-') === 0) {
     $customer_id = (string)$_SESSION['user_id'];
@@ -43,7 +48,6 @@ if ($customer_id) {
     $custRow = $stmtCust->fetch();
 }
 
-
 if (!$custRow) {
     header("Location: Login.php");
     exit;
@@ -52,7 +56,7 @@ if (!$custRow) {
 if (strcasecmp(trim((string)($custRow['cust_status'] ?? 'Active')), 'Inactive') === 0) {
     session_unset();
     session_destroy();
-    header("Location: Login.php?error=inactive");
+    header("Location: Login.php?inactive=1");
     exit;
 }
 
@@ -88,17 +92,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'repea
         $stmtUsed->execute([$actualSlotId]);
         $usedCount = (int)$stmtUsed->fetchColumn();
 
-        if (strcasecmp((string)$chosenSlot['slot_status'], 'Closed') === 0 || $usedCount + 1 > $cap) {
+        // Prevents customer from reordering multiple times
+        $stmtActChk = $pdo->prepare("
+            SELECT order_id FROM order_information
+            WHERE customer_id = ? AND status_id NOT IN (5, 7)
+            LIMIT 1
+        ");
+        $stmtActChk->execute([$customer_id]);
+        $existingActiveOrd = $stmtActChk->fetchColumn();
+
+        if ($existingActiveOrd) {
+            $_SESSION['cust_dashboard_flash'] = [
+                'type'    => 'error',
+                'message' => "Active Order in Progress: You already have an active order ({$existingActiveOrd}). Please wait until it is completed or cancel it before placing a new order."
+            ];
+        } elseif (strcasecmp((string)$chosenSlot['slot_status'], 'Closed') === 0 || date('H:i:s') >= (string)$chosenSlot['time_to'] || $usedCount + 1 > $cap) {
             $_SESSION['cust_dashboard_flash'] = [
                 'type'    => 'error',
                 'message' => "Selected batch slot ({$chosenSlot['slot_label']}) is full or closed. Please choose another batch window."
             ];
         } else {
-            $stmtProd = $pdo->prepare("SELECT * FROM container_product WHERE product_id = ? LIMIT 1");
-            $stmtProd->execute([$prodInput]);
+            $stmtProd = $pdo->prepare("SELECT * FROM container_product WHERE product_id = ? OR container_name = ? LIMIT 1");
+            $stmtProd->execute([$prodInput, $prodInput]);
             $prodRow = $stmtProd->fetch() ?: $pdo->query("SELECT * FROM container_product ORDER BY product_id ASC LIMIT 1")->fetch();
 
             $actualProdId = (string)$prodRow['product_id'];
+            $prodFullName = (string)(!empty($prodRow['container_name']) ? $prodRow['container_name'] : $prodRow['container_type']);
             $refillPrice  = (float)($prodRow['refill_price'] ?? 30.00);
 
             $maxOrd = (int)$pdo->query("SELECT COALESCE(MAX(CAST(SUBSTRING(order_id, 5) AS UNSIGNED)), 0) FROM order_information WHERE order_id LIKE 'ORD-%'")->fetchColumn();
@@ -114,6 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'repea
                 LIMIT 1
             ")->fetchColumn() ?: null;
 
+try {
             $pdo->beginTransaction();
             $stmtInsOrd = $pdo->prepare("
                 INSERT INTO order_information (
@@ -146,8 +166,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'repea
 
             $_SESSION['cust_dashboard_flash'] = [
                 'type'    => 'success',
-                'message' => "Order {$nextOrdId} (1x {$prodRow['container_type']} Refill — P" . number_format($refillPrice, 2) . ") queued for {$chosenSlot['slot_label']}!"
+                'message' => "Order {$nextOrdId} (1x {$prodFullName} Refill — P" . number_format($refillPrice, 2) . ") queued for {$chosenSlot['slot_label']}!"
             ];
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                error_log('WCDMS error: ' . $e->getMessage());
+                $_SESSION['cust_dashboard_flash'] = [
+                    'type'    => 'error',
+                    'message' => 'Unable to place your order right now. Please try again.'
+                ];
+            }
         }
     }
     header("Location: Customer_Dashboard.php");
@@ -158,6 +188,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'repea
 $brgyNum   = preg_replace('/[^0-9]/', '', (string)($custRow['barangay'] ?? '22')) ?: '22';
 $brgyShort = "Brgy {$brgyNum}";
 $fullName  = trim(($custRow['first_name'] ?? '') . ' ' . ($custRow['last_name'] ?? ''));
+
+// Fetch all products from container_product so prices & new containers sync dynamically
+$productsList = $pdo->query("
+    SELECT product_id, container_name, container_type, capacity_gallons,
+           refill_price, new_container_price, available_stock, availability_status
+    FROM container_product
+    ORDER BY product_id ASC
+")->fetchAll();
+
+$firstProduct = $productsList[0] ?? [
+    'product_id'          => 'PRD-01',
+    'container_name'      => '5-Gallon Slim Container with Faucet',
+    'container_type'      => '5-Gal - Slim',
+    'refill_price'        => 30.00,
+    'new_container_price' => 250.00
+];
 
 $rawSlots = $pdo->query("
     SELECT 
@@ -210,6 +256,8 @@ $stmtActive = $pdo->prepare("
         oi.order_type,
         oi.quantity,
         cp.container_type,
+        cp.container_name,
+        cp.refill_price AS current_refill_price,
         COALESCE(p.payment_status, 'Unpaid') AS payment_status
     FROM order_information o
     LEFT JOIN order_status os ON o.status_id = os.status_id
@@ -227,18 +275,18 @@ $actRow = $stmtActive->fetch();
 
 $activeOrderPayload = null;
 $usualRefillPayload = [
-    'product_id'    => 'PRD-01',
-    'product_label' => '5-Gal Slim',
-    'price'         => '30.00'
+    'product_id'    => (string)$firstProduct['product_id'],
+    'product_label' => (string)($firstProduct['container_name'] ?: $firstProduct['container_type']),
+    'price'         => number_format((float)$firstProduct['refill_price'], 2, '.', '')
 ];
 
 if ($actRow) {
-    $qty   = (int)($actRow['quantity'] ?: 1);
-    $cType = (string)($actRow['container_type'] ?: '5-Gal Slim');
-    if (stripos($cType, '5-Gal') === false) {
-        $cType = "5-Gal - {$cType}";
-    }
+    $qty          = (int)($actRow['quantity'] ?: 1);
+    $fullNameProd = !empty($actRow['container_name'])
+        ? (string)$actRow['container_name']
+        : (string)($actRow['container_type'] ?: '5-Gal Slim');
     $oType = (string)($actRow['order_type'] ?: 'Refill');
+
     $activeOrderPayload = [
         'order_id'          => $actRow['order_id'],
         'status_id'         => (int)$actRow['status_id'],
@@ -247,23 +295,29 @@ if ($actRow) {
         'rider_name'        => $actRow['rider_name'] ?: 'Pending Assignment',
         'total_price'       => number_format((float)$actRow['total_price'], 2, '.', ''),
         'is_utang'          => (strcasecmp((string)$actRow['payment_status'], 'Unpaid') === 0),
-        'item_summary'      => "{$qty}x {$cType} ({$oType})",
+        'item_summary'      => "{$qty}x {$fullNameProd} ({$oType})",
         'inspection_status' => $actRow['inspection_status'] ?: 'Good',
         'delay_hold_notice' => $actRow['delay_hold_notice'] ?: 'None'
     ];
+
     if (!empty($actRow['product_id'])) {
+        $liveRefillPrice = isset($actRow['current_refill_price'])
+            ? (float)$actRow['current_refill_price']
+            : (float)$firstProduct['refill_price'];
         $usualRefillPayload['product_id']    = (string)$actRow['product_id'];
-        $usualRefillPayload['product_label'] = (stripos($cType, 'Round') !== false) ? '5-Gal Round' : '5-Gal Slim';
+        $usualRefillPayload['product_label'] = $fullNameProd;
+        $usualRefillPayload['price']         = number_format($liveRefillPrice, 2, '.', '');
     }
 }
 
-// damaged container inspection alert banner
+// Damaged container inspection alert banner
 if (!$flashData && $activeOrderPayload) {
     $inspCheck = (string)($activeOrderPayload['inspection_status'] ?? '');
     if (preg_match('/damaged|leak|crack|replace|broken|fail/i', $inspCheck)) {
+        $defaultNewPrice = number_format((float)($firstProduct['new_container_price'] ?? 250.00), 2);
         $flashData = [
             'type'    => 'error',
-            'message' => "Container Inspection Alert ({$activeOrderPayload['order_id']}): Your container inspection turned up as \"{$inspCheck}\". Please contact Majestic Spring via majesticspring@gmail.com or call/text 098767892 for further details (or order a brand-new P250.00 replacement container below)."
+            'message' => "Container Inspection Alert ({$activeOrderPayload['order_id']}): Your container inspection turned up as \"{$inspCheck}\". Please contact Majestic Spring via majesticspring@gmail.com or call/text 098767892 for further details (or order a brand-new P{$defaultNewPrice} replacement container below)."
         ];
     }
 }
@@ -275,12 +329,13 @@ $dashboardPayloadJson = json_encode([
         'container_label' => $custRow['container_label'] ?: $custRow['first_name'],
         'barangay_short'  => $brgyShort
     ],
+    'products'         => $productsList,
     'active_order'     => $activeOrderPayload,
     'slots'            => $slotsPayload,
     'usual_refill'     => $usualRefillPayload,
     'recommended_slot' => $recommendedSlotIdx,
     'flash'            => $flashData
-], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
 
 // FETCH API for Live Customer Dashboard Data
 if (isset($_GET['ajax_dashboard']) && $_GET['ajax_dashboard'] === '1') {
@@ -289,8 +344,9 @@ if (isset($_GET['ajax_dashboard']) && $_GET['ajax_dashboard'] === '1') {
     exit;
 }
 
-ob_start(function ($html) use ($dashboardPayloadJson) {
+ob_start(function ($html) use ($dashboardPayloadJson, $majesticCsrf) {
     $html = preg_replace('/^\s*\?>\s*/', '', $html);
+    $html = majesticCsrfInject($html, $majesticCsrf);
     $scriptTag = "<script>window.MAJESTIC_CUSTOMER_DASHBOARD_DATA = {$dashboardPayloadJson};</script>\n";
     if (stripos($html, '</head>') !== false) {
         return str_ireplace('</head>', $scriptTag . '</head>', $html);

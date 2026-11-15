@@ -1,7 +1,7 @@
 <?php
 /*==========================
  * Database Connection for 
- * iew_Order_Status.php
+ * View_Order_Status.php
  ============================*/
 declare(strict_types=1);
 
@@ -9,6 +9,10 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 date_default_timezone_set('Asia/Manila');
+
+require_once __DIR__ . '/csrf_helper.php';
+majesticCsrfCheck();
+$majesticCsrf = majesticCsrfToken();
 
 $DB_HOST = '127.0.0.1';
 $DB_NAME = 'majestic_spring_wcdms';
@@ -26,6 +30,7 @@ try {
             PDO::ATTR_EMULATE_PREPARES   => false,
         ]
     );
+    $pdo->exec("SET time_zone = '+08:00'");
 } catch (PDOException $e) {
     die("Database Connection Failed: " . htmlspecialchars($e->getMessage()));
 }
@@ -43,8 +48,6 @@ if ($customer_id) {
     $customerProfile = $stmtCust->fetch();
 }
 
-
-
 if (!$customerProfile) {
     header("Location: Login.php");
     exit;
@@ -53,7 +56,7 @@ if (!$customerProfile) {
 if (strcasecmp(trim((string)($customerProfile['cust_status'] ?? 'Active')), 'Inactive') === 0) {
     session_unset();
     session_destroy();
-    header("Location: Login.php?error=inactive");
+    header("Location: Login.php?inactive=1");
     exit;
 }
 
@@ -68,7 +71,7 @@ $_SESSION['user']['customer_id'] = $customer_id;
 $flashData = $_SESSION['view_status_flash'] ?? null;
 unset($_SESSION['view_status_flash']);
 
-// Cancel Queued Order Action 
+// Cancel Queued Order Action
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'cancel_queued_order') {
     $orderToCancel = trim((string)($_POST['order_id'] ?? ''));
     if ($orderToCancel !== '') {
@@ -95,6 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'cance
         } else {
             $cancelledStatusId = (int)($pdo->query("SELECT status_id FROM order_status WHERE status_name LIKE '%Cancel%' LIMIT 1")->fetchColumn() ?: 7);
 
+try {
             $pdo->beginTransaction();
             $stmtCancel = $pdo->prepare("UPDATE order_information SET status_id = ? WHERE order_id = ? AND customer_id = ?");
             $stmtCancel->execute([$cancelledStatusId, $orderToCancel, $customer_id]);
@@ -119,6 +123,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'cance
                 'type'    => 'success',
                 'message' => "Order {$orderToCancel} has been successfully cancelled."
             ];
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                error_log('WCDMS error: ' . $e->getMessage());
+                $_SESSION['view_status_flash'] = [
+                    'type'    => 'error',
+                    'message' => 'Unable to cancel the order right now. Please try again.'
+                ];
+            }
         }
     }
     header("Location: View_Order_Status.php");
@@ -151,6 +165,7 @@ $stmtOrders = $pdo->prepare("
         oi.order_type,
         oi.quantity,
         cp.container_type,
+        cp.container_name,
         COALESCE(p.payment_status, 'Unpaid') AS payment_status
     FROM order_information o
     LEFT JOIN order_status os ON o.status_id = os.status_id
@@ -172,12 +187,13 @@ foreach ($allOrders as $ord) {
     $stId   = (int)$ord['status_id'];
     $stName = (string)($ord['status_name'] ?: 'Queued');
     $qty    = (int)($ord['quantity'] ?: 1);
-    $cType  = (string)($ord['container_type'] ?: '5-Gal Slim');
-    if (stripos($cType, '5-Gal') === false) {
-        $cType = "5-Gal - {$cType}";
-    }
-    $oType   = (string)($ord['order_type'] ?: 'Refill');
-    $summary = "{$qty}x {$cType} ({$oType})";
+    $oType  = (string)($ord['order_type'] ?: 'Refill');
+
+    $fullContainerName = ($oType === 'Other')
+        ? 'Other'
+        : (string)(!empty($ord['container_name']) ? $ord['container_name'] : ($ord['container_type'] ?: '5-Gal Slim'));
+
+    $summary = "{$qty}x {$fullContainerName} ({$oType})";
 
     $category = 'Active';
     if ($stId === 5) {
@@ -218,7 +234,7 @@ if ($activeOrderPayload === null && !empty($historyPayload)) {
     $activeOrderPayload = $historyPayload[0];
 }
 
-// Surface damaged container inspection alert in flash banner 
+// Surface damaged container inspection alert in flash banner
 if (!$flashData && $activeOrderPayload) {
     $inspCheck = (string)($activeOrderPayload['inspection_status'] ?? '');
     if (preg_match('/damaged|leak|crack|replace|broken|fail/i', $inspCheck)) {
@@ -239,17 +255,18 @@ $viewStatusJson = json_encode([
     'active_order' => $activeOrderPayload,
     'history'      => $historyPayload,
     'flash'        => $flashData
-], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
 
-// FETCH API ForLive Order Status & History 
+// FETCH API For Live Order Status & History
 if (isset($_GET['ajax_status']) && $_GET['ajax_status'] === '1') {
     header('Content-Type: application/json; charset=utf-8');
     echo $viewStatusJson;
     exit;
 }
 
-ob_start(function ($html) use ($viewStatusJson) {
+ob_start(function ($html) use ($viewStatusJson, $majesticCsrf) {
     $html = preg_replace('/^\s*\?>\s*/', '', $html);
+    $html = majesticCsrfInject($html, $majesticCsrf);
     $scriptTag = "<script>window.MAJESTIC_VIEW_STATUS_DATA = {$viewStatusJson};</script>\n";
     if (stripos($html, '</head>') !== false) {
         return str_ireplace('</head>', $scriptTag . '</head>', $html);

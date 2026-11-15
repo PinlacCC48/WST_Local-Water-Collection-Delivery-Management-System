@@ -106,8 +106,7 @@
 
          
           <form id="loginForm" method="POST" action="Login.php" novalidate>
-            <input type="hidden" name="csrf_token" value="majestic_csrf_token_2026" />
-
+       <!-- Login Field -->
             <div class="form-group">
               <label for="loginIdentifier" class="form-label">Email Address or Phone No.:*</label>
               <div class="input-wrapper">
@@ -123,7 +122,7 @@
                 />
               </div>
             </div>
-
+         <!-- Password -->
             <div class="form-group">
               <label for="loginPassword" class="form-label">Password:*</label>
               <div class="input-wrapper">
@@ -142,6 +141,8 @@
               </div>
             </div>
 
+
+       <!-- Remember Me & Forgot Password -->
             <div class="remember-forgot-row">
               <label class="remember-label" for="rememberMeChk">
                 <input type="checkbox" id="rememberMeChk" name="remember_me" class="remember-checkbox" />

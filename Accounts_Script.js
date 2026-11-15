@@ -138,8 +138,9 @@
     if (accGateNote) accGateNote.value = acc.gate_rider_note || '';
     if (accStatus) accStatus.value = acc.status || 'Active';
     if (accPassword) {
-      accPassword.value = acc.password || '';
-      accPassword.placeholder = 'Enter or update password';
+      // Stored passwords are hashed and never sent to the browser; blank = keep current password
+      accPassword.value = '';
+      accPassword.placeholder = 'Leave blank to keep current password';
     }
   };
 

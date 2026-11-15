@@ -1,9 +1,9 @@
 <?php
-/* =============================
+/* =========================================================================
    Database Connection for:
    1. Submit_Water_Order.php
    2. Order_New_Container.php
-   ============================== */
+   ========================================================================= */
 declare(strict_types=1);
 
 date_default_timezone_set('Asia/Manila');
@@ -25,11 +25,20 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
     ]);
+    $pdo->exec("SET time_zone = '+08:00'");
 } catch (PDOException $e) {
     die('Database Connection Error: ' . htmlspecialchars($e->getMessage()));
 }
 
 $currentPageName = strtolower(basename($_SERVER['PHP_SELF'] ?? ''));
+
+/* =========   CSRF PROTECTION (all POST forms on these pages)   ========= */
+require_once __DIR__ . '/csrf_helper.php';
+majesticCsrfCheck();
+$majesticCsrf = majesticCsrfToken();
+if (!isset($_GET['ajax_slots'])) {
+    ob_start(static fn(string $html): string => majesticCsrfInject($html, $majesticCsrf));
+}
 
 /* ========Generator for new Primary key ORD-0000 ============ */
 function getNextCustomerRecordId(PDO $pdo, string $table, string $column, string $prefix): string {
@@ -44,7 +53,7 @@ function getNextCustomerRecordId(PDO $pdo, string $table, string $column, string
     return sprintf('%s%04d', $prefix, $maxNum + 1);
 }
 
-/* ========Get active logged in customer profile =========== */
+/* ========GET active logged in customer profile =========== */
 function getActiveCustomerProfile(PDO $pdo): array {
     $sessionCustId = (string)($_SESSION['user']['customer_id'] ?? $_SESSION['customer_id'] ?? '');
     if ($sessionCustId === '' && !empty($_SESSION['user_id']) && strpos((string)$_SESSION['user_id'], 'CUS-') === 0) {
@@ -63,8 +72,6 @@ function getActiveCustomerProfile(PDO $pdo): array {
             exit;
         }
     }
-
- 
 
     if (!$custRow) {
         header('Location: Login.php');
@@ -173,15 +180,48 @@ function getTodayBatchSlots(PDO $pdo): array {
     return $slots;
 }
 
-/*=====Fetch today's batch slots for AJAX requests =====*/
-if (isset($_GET['ajax_slots']) && $_GET['ajax_slots'] === '1') {
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode([
-        'status'      => 'ok',
-        'server_time' => date('h:i:s A'),
-        'slots'       => getTodayBatchSlots($pdo),
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+/* ======= Resolve Selected Container Product from ID, Name, or Type ======= */
+function resolveSelectedContainerProduct(PDO $pdo, string $selection): array {
+    $sel = trim($selection);
+    if ($sel !== '') {
+        $stmt = $pdo->prepare("
+            SELECT * FROM container_product
+            WHERE product_id = :id
+               OR LOWER(container_name) = LOWER(:name)
+               OR LOWER(container_type) = LOWER(:type)
+            ORDER BY product_id ASC
+            LIMIT 1
+        ");
+        $stmt->execute([
+            ':id'   => $sel,
+            ':name' => $sel,
+            ':type' => $sel
+        ]);
+        $found = $stmt->fetch();
+        if ($found) {
+            return $found;
+        }
+
+        if (stripos($sel, 'Round') !== false) {
+            $rStmt = $pdo->query("SELECT * FROM container_product WHERE product_id = 'PRD-02' OR container_type LIKE '%Round%' ORDER BY product_id ASC LIMIT 1");
+            $rRow  = $rStmt->fetch();
+            if ($rRow) {
+                return $rRow;
+            }
+        }
+    }
+
+    $fallback = $pdo->query("SELECT * FROM container_product ORDER BY product_id ASC LIMIT 1")->fetch();
+    return $fallback ?: [
+        'product_id'          => 'PRD-01',
+        'container_name'      => '5-Gallon Slim Container with Faucet',
+        'container_type'      => '5-Gal - Slim',
+        'capacity_gallons'    => 5,
+        'refill_price'        => 30.00,
+        'new_container_price' => 250.00,
+        'available_stock'     => 20,
+        'availability_status' => 'Available'
+    ];
 }
 
 /* =======Update Customer Delivery Information ======= */
@@ -263,7 +303,7 @@ if ($currentPageName === 'submit_water_order.php') {
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $slotId         = max(1, min(5, (int)($_POST['slot_id'] ?? 1)));
-        $containerType  = trim((string)($_POST['container_type'] ?? '5-Gal Slim'));
+        $containerType  = trim((string)($_POST['container_type'] ?? 'PRD-01'));
         $quantity       = max(1, (int)($_POST['quantity'] ?? 1));
         $containerLabel = trim((string)($_POST['container_label'] ?? ''));
         $barangayRaw    = trim((string)($_POST['barangay'] ?? 'Brgy 22'));
@@ -292,7 +332,7 @@ if ($currentPageName === 'submit_water_order.php') {
                 $submitRefillMessage = 'Tag Name Taken: The Container Label "' . htmlspecialchars($containerLabel) . '" is already in use by another customer. Please choose a different tag name.';
                 $submitRefillType    = 'error';
             } else {
-               $capStmt = $pdo->prepare("
+                $capStmt = $pdo->prepare("
                     SELECT ts.batch_capacity,
                            ts.slot_label,
                            ts.time_to,
@@ -310,22 +350,29 @@ if ($currentPageName === 'submit_water_order.php') {
                 $maxCap    = $capRow ? (int)$capRow['batch_capacity'] : 20;
                 $isClosed  = $capRow && (strcasecmp((string)$capRow['slot_status'], 'Closed') === 0 || date('H:i:s') >= (string)$capRow['time_to']);
 
-                if ($currentStock <= 0 || $availStat === 'Out of Stock') {
-                    $orderContainerMessage = 'Out of Stock: The selected 5-Gallon container type is currently out of stock.';
-                    $orderContainerType    = 'error';
-                } elseif ($isClosed) {
-                    $orderContainerMessage = "Batch Slot Closed: {$capRow['slot_label']} has already passed its cut-off or is closed. Please select an open delivery batch slot.";
-                    $orderContainerType    = 'error';
-                } elseif ($queuedNow + 1 > $maxCap) {
-                    $orderContainerMessage = "Batch Slot Full: Batch {$slotId} has reached its {$maxCap}-container capacity. Please select another delivery batch slot.";
-                    $orderContainerType    = 'error';
-                } else {
-                    $productId = (stripos($containerType, 'Round') !== false) ? 'PRD-02' : 'PRD-01';
+                // Prevents customer from reordering multiple times
+                $actChkStmt = $pdo->prepare("
+                    SELECT order_id FROM order_information
+                    WHERE customer_id = :cid AND status_id NOT IN (5, 7)
+                    LIMIT 1
+                ");
+                $actChkStmt->execute([':cid' => $customerId]);
+                $existingActiveOrd = $actChkStmt->fetchColumn();
 
-                    $pStmt = $pdo->prepare("SELECT refill_price FROM container_product WHERE product_id = :pid LIMIT 1");
-                    $pStmt->execute([':pid' => $productId]);
-                    $prodRow    = $pStmt->fetch();
-                    $refillRate = $prodRow ? (float)$prodRow['refill_price'] : 30.00;
+                if ($existingActiveOrd) {
+                    $submitRefillMessage = "Active Order in Progress: You already have an active order ({$existingActiveOrd}). Please wait until it is delivered or cancel it on View Order Status before placing another order.";
+                    $submitRefillType    = 'error';
+                } elseif ($isClosed) {
+                    $submitRefillMessage = "Batch Slot Closed: {$capRow['slot_label']} has already passed its cut-off or is closed. Please select an open batch window.";
+                    $submitRefillType    = 'error';
+                } elseif ($queuedNow + $quantity > $maxCap) {
+                    $remaining           = max(0, $maxCap - $queuedNow);
+                    $submitRefillMessage = "Batch Capacity Exceeded: Batch {$slotId} only has {$remaining} container slot(s) remaining (Max {$maxCap}). Please choose another batch window or reduce quantity.";
+                    $submitRefillType    = 'error';
+                } else {
+                    $prodRow    = resolveSelectedContainerProduct($pdo, $containerType);
+                    $productId  = (string)$prodRow['product_id'];
+                    $refillRate = (float)($prodRow['refill_price'] ?? 30.00);
 
                     $subtotal   = $refillRate * $quantity;
                     $totalPrice = $subtotal;
@@ -414,7 +461,8 @@ if ($currentPageName === 'submit_water_order.php') {
                         if ($pdo->inTransaction()) {
                             $pdo->rollBack();
                         }
-                        $submitRefillMessage = 'Database Error: ' . $e->getMessage();
+                        error_log('WCDMS submit refill error: ' . $e->getMessage());
+                        $submitRefillMessage = 'Database Error: Unable to submit your order right now. Please try again.';
                         $submitRefillType    = 'error';
                     }
                 }
@@ -424,6 +472,23 @@ if ($currentPageName === 'submit_water_order.php') {
 
     $customerProfile = getActiveCustomerProfile($pdo);
     $todaySlots      = getTodayBatchSlots($pdo);
+    $productsList    = $pdo->query("
+        SELECT product_id, container_name, container_type, capacity_gallons,
+               refill_price, new_container_price, available_stock, availability_status
+        FROM container_product
+        ORDER BY product_id ASC
+    ")->fetchAll();
+
+    // FETCH API for Live Batch Slots & Product Prices
+    if (isset($_GET['ajax_slots']) && $_GET['ajax_slots'] === '1') {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'status'   => 'ok',
+            'slots'    => $todaySlots,
+            'products' => $productsList
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
 
     $selectedSlotParam = isset($_GET['slot']) ? max(1, min(5, (int)$_GET['slot'])) : 1;
     if (!isset($_GET['slot'])) {
@@ -435,7 +500,7 @@ if ($currentPageName === 'submit_water_order.php') {
         }
     }
 
-    $refillRate = (float)($pdo->query("SELECT refill_price FROM container_product WHERE product_id = 'PRD-01' LIMIT 1")->fetchColumn() ?: 30.00);
+    $refillRate = !empty($productsList) ? (float)$productsList[0]['refill_price'] : 30.00;
 
     $lastRefillStmt = $pdo->prepare("
         SELECT o.slot_id,
@@ -458,7 +523,7 @@ if ($currentPageName === 'submit_water_order.php') {
         $dbPreset = [
             'slot_id'         => (int)$lastRefillRow['slot_id'],
             'slot_label'      => (string)$lastRefillRow['slot_label'],
-            'container_type'  => ($lastRefillRow['product_id'] === 'PRD-02') ? '5-Gal Round' : '5-Gal Slim',
+            'container_type'  => (string)$lastRefillRow['product_id'],
             'quantity'        => (int)$lastRefillRow['quantity'],
             'container_label' => $customerProfile['container_label'],
             'barangay'        => $customerProfile['barangay_short'],
@@ -472,6 +537,7 @@ if ($currentPageName === 'submit_water_order.php') {
     echo "<script>\n";
     echo "  window.MAJESTIC_SUBMIT_REFILL_DATA = " . json_encode([
         'customer'      => $customerProfile,
+        'products'      => $productsList,
         'slots'         => $todaySlots,
         'selected_slot' => $selectedSlotParam,
         'refill_rate'   => $refillRate,
@@ -480,7 +546,7 @@ if ($currentPageName === 'submit_water_order.php') {
             'message' => $submitRefillMessage,
             'type'    => $submitRefillType
         ]
-    ], JSON_UNESCAPED_UNICODE) . ";\n";
+    ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) . ";\n";
     echo "</script>\n";
 }
 
@@ -498,10 +564,9 @@ if ($currentPageName === 'order_new_container.php') {
         $orderContainerMessage = 'New Container Order ' . htmlspecialchars((string)$_GET['ordered']) . ' has been placed and queued! You can track its status on View Order Status.';
         $orderContainerType    = 'success';
     }
-  
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $selectedContainer = trim((string)($_POST['container_type'] ?? '5-Gal - Slim'));
+        $selectedContainer = trim((string)($_POST['container_type'] ?? 'PRD-01'));
         $refillOption      = trim((string)($_POST['water_refill_option'] ?? 'With Refill'));
         $slotLabelRaw      = trim((string)($_POST['slot_label'] ?? '10:00 AM - 12:00 PM'));
         $containerLabel    = trim((string)($_POST['container_label'] ?? ''));
@@ -532,7 +597,8 @@ if ($currentPageName === 'order_new_container.php') {
                 $orderContainerMessage = 'Tag Name Taken: The Container Label "' . htmlspecialchars($containerLabel) . '" is already in use by another customer. Please choose a different tag name.';
                 $orderContainerType    = 'error';
             } else {
-                $productId = (stripos($selectedContainer, 'Round') !== false) ? 'PRD-02' : 'PRD-01';
+                $prodRow   = resolveSelectedContainerProduct($pdo, $selectedContainer);
+                $productId = (string)$prodRow['product_id'];
 
                 $slotId = 2;
                 if (preg_match('/^[1-5]$/', $slotLabelRaw)) {
@@ -549,16 +615,12 @@ if ($currentPageName === 'order_new_container.php') {
                     $slotId = 5;
                 }
 
-                $prodStmt = $pdo->prepare("SELECT * FROM container_product WHERE product_id = :pid LIMIT 1");
-                $prodStmt->execute([':pid' => $productId]);
-                $prodRow = $prodStmt->fetch();
+                $currentStock = (int)($prodRow['available_stock'] ?? 20);
+                $availStat    = (string)($prodRow['availability_status'] ?? 'Available');
+                $newPriceRate = (float)($prodRow['new_container_price'] ?? 250.00);
+                $refillRate   = (float)($prodRow['refill_price'] ?? 30.00);
 
-                $currentStock = $prodRow ? (int)$prodRow['available_stock'] : 20;
-                $availStat    = $prodRow ? (string)$prodRow['availability_status'] : 'Available';
-                $newPriceRate = $prodRow ? (float)$prodRow['new_container_price'] : 250.00;
-                $refillRate   = $prodRow ? (float)$prodRow['refill_price'] : 30.00;
-
-             $capStmt = $pdo->prepare("
+                $capStmt = $pdo->prepare("
                     SELECT ts.batch_capacity,
                            ts.slot_label,
                            ts.time_to,
@@ -576,8 +638,20 @@ if ($currentPageName === 'order_new_container.php') {
                 $maxCap    = $capRow ? (int)$capRow['batch_capacity'] : 20;
                 $isClosed  = $capRow && (strcasecmp((string)$capRow['slot_status'], 'Closed') === 0 || date('H:i:s') >= (string)$capRow['time_to']);
 
-                if ($currentStock <= 0 || $availStat === 'Out of Stock') {
-                    $orderContainerMessage = 'Out of Stock: The selected 5-Gallon container type is currently out of stock.';
+                // Prevents customer from reordering multiple times
+                $actChkStmt = $pdo->prepare("
+                    SELECT order_id FROM order_information
+                    WHERE customer_id = :cid AND status_id NOT IN (5, 7)
+                    LIMIT 1
+                ");
+                $actChkStmt->execute([':cid' => $customerId]);
+                $existingActiveOrd = $actChkStmt->fetchColumn();
+
+                if ($existingActiveOrd) {
+                    $orderContainerMessage = "Active Order in Progress: You already have an active order ({$existingActiveOrd}). Please wait until it is delivered or cancel it on View Order Status before placing another order.";
+                    $orderContainerType    = 'error';
+                } elseif ($currentStock <= 0 || $availStat === 'Out of Stock') {
+                    $orderContainerMessage = 'Out of Stock: The selected container (' . htmlspecialchars((string)$prodRow['container_name']) . ') is currently out of stock.';
                     $orderContainerType    = 'error';
                 } elseif ($isClosed) {
                     $orderContainerMessage = "Batch Slot Closed: {$capRow['slot_label']} has already passed its cut-off or is closed. Please select an open delivery batch slot.";
@@ -613,19 +687,17 @@ if ($currentPageName === 'order_new_container.php') {
                             $gateNote
                         );
 
-                        $nextStock  = max(0, $currentStock - 1);
-                        $nextStatus = ($nextStock === 0) ? 'Out of Stock' : 'Available';
-                        $updStock   = $pdo->prepare("
+                        // stock deduction: fails if another customer just took the last unit
+                        $updStock = $pdo->prepare("
                             UPDATE container_product
-                            SET available_stock = :stk,
-                                availability_status = :st
-                            WHERE product_id = :pid
+                            SET available_stock = available_stock - 1,
+                                availability_status = CASE WHEN available_stock <= 0 THEN 'Out of Stock' ELSE 'Available' END
+                            WHERE product_id = :pid AND available_stock > 0
                         ");
-                        $updStock->execute([
-                            ':stk' => $nextStock,
-                            ':st'  => $nextStatus,
-                            ':pid' => $productId
-                        ]);
+                        $updStock->execute([':pid' => $productId]);
+                        if ($updStock->rowCount() === 0) {
+                            throw new RuntimeException('OUT_OF_STOCK');
+                        }
 
                         $empId = $pdo->query("
                             SELECT employee_id FROM employee
@@ -698,7 +770,10 @@ if ($currentPageName === 'order_new_container.php') {
                         if ($pdo->inTransaction()) {
                             $pdo->rollBack();
                         }
-                        $orderContainerMessage = 'Database Error: ' . $e->getMessage();
+                        error_log('WCDMS new container error: ' . $e->getMessage());
+                        $orderContainerMessage = ($e->getMessage() === 'OUT_OF_STOCK')
+                            ? 'Out of Stock: The selected container was just taken by another customer. Please choose another container.'
+                            : 'Database Error: Unable to place your order right now. Please try again.';
                         $orderContainerType    = 'error';
                     }
                 }
@@ -722,6 +797,6 @@ if ($currentPageName === 'order_new_container.php') {
             'message' => $orderContainerMessage,
             'type'    => $orderContainerType
         ]
-    ], JSON_UNESCAPED_UNICODE) . ";\n";
+    ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) . ";\n";
     echo "</script>\n";
 }

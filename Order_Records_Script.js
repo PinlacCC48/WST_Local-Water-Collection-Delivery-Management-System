@@ -1,5 +1,4 @@
-/* =========   ELEMENT REFERENCES  ========== */
-
+/**Order_Records_Script.js */
 (() => {
   const body = document.body;
   const themeToggleBtn = document.getElementById('themeToggleBtn');
@@ -60,10 +59,11 @@
     orderRecordForm.appendChild(recordFormAction);
   }
 
-  // Load records injected by admin_db4.php
+  // Load MySQL Data injected by admin_db4.php
   const recordsData = window.MAJESTIC_RECORDS_DATA || {};
   const allRecords = Array.isArray(recordsData.records) ? recordsData.records : [];
   const customersLookup = Array.isArray(recordsData.customers) ? recordsData.customers : [];
+  const productsList = Array.isArray(recordsData.products) ? recordsData.products : [];
   const todayIso = recordsData.today_iso || new Date().toISOString().slice(0, 10);
   const initialSelectedDate = recordsData.selected_date || todayIso;
   const currentAdminUser = recordsData.current_admin_user || 'EMP-0001 (Admin)';
@@ -71,14 +71,47 @@
   let activeTabFilter = 'ALL';
   let selectedRecordId = null;
 
-  /* =========   light/dark mode images ========== */
+  /* =========   POPULATE PRODUCT DROPDOWN  ========== */
+  const populateRecordProductOptions = () => {
+    if (!recProductOrder || productsList.length === 0) return;
+    const prevVal = recProductOrder.value;
+    recProductOrder.textContent = '';
+
+    productsList.forEach((p) => {
+      const rPrice = Number(p.refill_price) || 0;
+      const nPrice = Number(p.new_container_price) || 0;
+      const labelBase = p.container_name || p.container_type || p.product_id;
+
+      [
+        { val: `REFILL|${p.product_id}`, text: `${labelBase} — Refill Only (P${rPrice.toFixed(2)})`, price: rPrice },
+        { val: `NEW|${p.product_id}`, text: `${labelBase} — New / Replacement Container (P${nPrice.toFixed(2)})`, price: nPrice },
+        { val: `NEW-REFILL|${p.product_id}`, text: `${labelBase} — New Container + Refill (P${(nPrice + rPrice).toFixed(2)})`, price: nPrice + rPrice }
+      ].forEach((o) => {
+        const opt = document.createElement('option');
+        opt.value = o.val;
+        opt.textContent = o.text;
+        opt.dataset.price = String(o.price);
+        recProductOrder.appendChild(opt);
+      });
+    });
+
+    const otherOpt = document.createElement('option');
+    otherOpt.value = 'OTHER';
+    otherOpt.textContent = 'Other (Manual Price)';
+    otherOpt.dataset.price = '0';
+    recProductOrder.appendChild(otherOpt);
+
+    if (prevVal && [...recProductOrder.options].some((o) => o.value === prevVal)) {
+      recProductOrder.value = prevVal;
+    }
+  };
+
+  /* =========  light and darkmode images ========== */
   const syncThemeIcon = (isDark) => {
     if (!themeToggleImg) return;
     themeToggleImg.src = isDark ? 'Darkmode_Pic.png' : 'Lightmode_Pic.png';
     themeToggleImg.alt = isDark ? 'Dark Mode Active' : 'Light Mode Active';
   };
-
-/* =========   banner function  ========== */
 
   const showStatus = (message, type = 'success') => {
     if (!recordStatusBanner) return;
@@ -113,7 +146,7 @@
     showStatus(recordsData.flash.message, recordsData.flash.type || 'success');
   }
 
-  /* =========== Theme Toggle ================ */
+  /* ===========  Theme & Toggle ================ */
   try {
     const isDark = localStorage.getItem('majestic_theme') === 'dark';
     body.classList.toggle('dark-mode', isDark);
@@ -130,6 +163,7 @@
       try {
         localStorage.setItem('majestic_theme', isDark ? 'dark' : 'light');
       } catch (err) {
+        // Ignore storage errors
       }
       window.dispatchEvent(new CustomEvent('majestic:records-updated'));
     });
@@ -158,7 +192,7 @@
     return allRecords.filter((rec) => matchesSelectedDate(rec, dateFilter));
   };
 
-  // Expose shared API for Order_Records_ChartsJS.js
+  // shared API for Order_Records_ChartsJS.js
   window.MajesticOrderRecords = {
     getDayRecords: getRecordsForSelectedDateAllBatches,
     getFilteredRecords: getRecordsForSelectedDateAndBatch,
@@ -169,7 +203,7 @@
     showStatus
   };
 
-  /* =========== Dynamic Header, Tab Counters & Audit Cards ================ */
+  /* =========== Header, Tab Counters & Audit Cards ================ */
   const updateHeaderAndAuditCards = () => {
     const dateFilter = filterDateInput ? filterDateInput.value : '';
     if (recordsLogHeaderTitle) {
@@ -236,14 +270,20 @@
     if (auditTotalSub) auditTotalSub.textContent = `${paidOrdersCount} Paid | ${unpaidOrdersCount} Unpaid`;
   };
 
-  /* =========== 4. Live Total Calculation from Order Type + Quantity ================ */
+  /* =========== Live Total Calculation from Order Type + Quantity ================ */
   const recalculateTotalFromTypeAndQty = () => {
     if (!recProductOrder || !recTotalPaid) return;
     const t = (recProductOrder.value || '').trim();
-    if (!t) return;
+    if (!t || t === 'OTHER') return;
+
     const qty = Math.max(1, parseInt(recQuantity ? recQuantity.value : '1', 10) || 1);
-    const unit = /new/i.test(t) ? (/refill/i.test(t) ? 280 : 250) : 30;
-    recTotalPaid.value = `P${(unit * qty).toFixed(2)}`;
+    const selectedOpt = recProductOrder.options[recProductOrder.selectedIndex];
+    if (selectedOpt && selectedOpt.dataset && selectedOpt.dataset.price !== undefined) {
+      const unitPrice = Number(selectedOpt.dataset.price) || 0;
+      recTotalPaid.value = `P${(unitPrice * qty).toFixed(2)}`;
+      return;
+    }
+
   };
 
   if (recProductOrder) {
@@ -311,11 +351,11 @@
     if (recOrderChannel) recOrderChannel.value = 'User/Admin Encoded';
     if (recOrderIdBadge) recOrderIdBadge.value = 'ORD-#';
     if (recCustomerIdBadge) recCustomerIdBadge.value = 'CUS-#';
-    if (recProductOrder) recProductOrder.value = '5-Gal - Slim Refill';
+    if (recProductOrder && recProductOrder.options.length > 0) recProductOrder.selectedIndex = 0;
     if (recQuantity) recQuantity.value = '1';
     if (recOrderBatch) recOrderBatch.value = 'Batch 1: 8:00 AM - 10:00 AM';
     if (recCashStatus) recCashStatus.value = 'Paid';
-    if (recTotalPaid) recTotalPaid.value = 'P30.00';
+    recalculateTotalFromTypeAndQty();
     if (recDatePaid) recDatePaid.value = (filterDateInput && filterDateInput.value) ? filterDateInput.value : todayIso;
     if (recRecordedBy) recRecordedBy.value = currentAdminUser;
     clearTableSelection();
@@ -345,8 +385,10 @@
     if (recCustomerIdBadge) recCustomerIdBadge.value = rec.customer_id;
 
     if (recProductOrder) {
-      const cleanType = rec.base_order_type || (rec.order_summary || '5-Gal - Slim Refill').replace(/^\d+x\s+/i, '');
-      recProductOrder.value = cleanType;
+      const targetVal = rec.product_select || 'REFILL|PRD-01';
+      if ([...recProductOrder.options].some((o) => o.value === targetVal)) {
+        recProductOrder.value = targetVal;
+      }
     }
     if (recQuantity) {
       recQuantity.value = String(rec.quantity || 1);
@@ -542,33 +584,28 @@
     });
   }
 
+  populateRecordProductOptions();
+  recalculateTotalFromTypeAndQty();
   if (recDatePaid && !recDatePaid.value) recDatePaid.value = initialSelectedDate;
   if (recRecordedBy && !recRecordedBy.value) recRecordedBy.value = currentAdminUser;
   renderOrderRecordsTable();
 
-
-  /* =========== Live Order Records & Chart.js Auto-Refresh via Fetch API =========== */
-  const fetchLiveOrderRecords = async () => {
+  /* =========== Live Order Records Auto-Refresh via Fetch API =========== */
+  const fetchLiveRecords = async () => {
     try {
       const response = await fetch('Order_Records.php?ajax_records=1', {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
         cache: 'no-store'
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const freshData = await response.json();
       if (freshData.status !== 'ok') return;
 
-      if (Array.isArray(freshData.records)) {
-        allRecords.splice(0, allRecords.length, ...freshData.records);
-      }
-      if (Array.isArray(freshData.customers)) {
-        customersLookup.splice(0, customersLookup.length, ...freshData.customers);
-      }
+      if (Array.isArray(freshData.records)) allRecords.splice(0, allRecords.length, ...freshData.records);
+      if (Array.isArray(freshData.customers)) customersLookup.splice(0, customersLookup.length, ...freshData.customers);
+      if (Array.isArray(freshData.products)) productsList.splice(0, productsList.length, ...freshData.products);
 
       renderOrderRecordsTable();
     } catch (error) {
@@ -576,5 +613,5 @@
     }
   };
 
-  setInterval(fetchLiveOrderRecords, 15000);
+  setInterval(fetchLiveRecords, 15000);
 })();

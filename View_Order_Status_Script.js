@@ -1,7 +1,5 @@
-
-
 document.addEventListener("DOMContentLoaded", () => {
-  //  Theme Toggle
+  // Theme Toggle
   const themeToggleBtn = document.getElementById("themeToggleBtn");
   const themeToggleImg = document.getElementById("themeToggleImg");
 
@@ -25,12 +23,13 @@ document.addEventListener("DOMContentLoaded", () => {
       try {
         localStorage.setItem("majestic_theme", nextDark ? "dark" : "light");
       } catch (err) {
+        // Ignore storage error
       }
       applyTheme(nextDark);
     });
   }
 
-/* =========   ELEMENT REFERENCES  ========== */
+  /* =========   ELEMENT REFERENCES  ========== */
   const trackerSubInfo = document.getElementById("trackerSubInfo");
   const trackerRiderAndTotal = document.getElementById("trackerRiderAndTotal");
   const trackerOrderItemLine = document.getElementById("trackerOrderItemLine");
@@ -77,7 +76,7 @@ document.addEventListener("DOMContentLoaded", () => {
     showFeedback(statusData.flash.message, statusData.flash.type === "error");
   }
 
-  //  opens Digital Receipt popup window
+  // Opens Digital Receipt popup window
   const openDigitalReceiptPopup = (orderId) => {
     if (!orderId) return;
     const width = 445;
@@ -96,7 +95,7 @@ document.addEventListener("DOMContentLoaded", () => {
       popupWin.focus();
     } else {
       showFeedback(
-        "Popup blocked: Please allow popups for localhost to view your Digital Receipt window.",
+        "Popup blocked: Please allow popups for this site to view your Digital Receipt window.",
         true
       );
     }
@@ -132,11 +131,6 @@ document.addEventListener("DOMContentLoaded", () => {
         b3.textContent = "Gate/Rider Note: ";
         trackerGateNoteLine.append(b3, customer?.gate_rider_note || "None");
       }
-      if (ord.delay_hold_notice && ord.delay_hold_notice !== "None") {
-      showFeedback(`Delay/Hold Notice (${ord.order_id}): ${ord.delay_hold_notice}`, true);
-    }
-
-    const stId = Number(ord.status_id) || 1;
       if (cancelTargetOrderIdInput) {
         cancelTargetOrderIdInput.value = "";
       }
@@ -145,6 +139,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (cancelTargetOrderIdInput) {
       cancelTargetOrderIdInput.value = ord.order_id;
+    }
+
+    if (ord.delay_hold_notice && ord.delay_hold_notice !== "None" && (!statusData.flash || !statusData.flash.message)) {
+      showFeedback(`Delay/Hold Notice (${ord.order_id}): ${ord.delay_hold_notice}`, true);
     }
 
     if (trackerSubInfo) {

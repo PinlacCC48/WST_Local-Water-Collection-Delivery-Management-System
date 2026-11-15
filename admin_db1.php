@@ -12,6 +12,8 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+require_once __DIR__ . '/csrf_helper.php';
+
 $dbHost = '127.0.0.1';
 $dbPort = '3306';
 $dbName = 'majestic_spring_wcdms';
@@ -25,10 +27,25 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
     ]);
+    $pdo->exec("SET time_zone = '+08:00'");
 } catch (PDOException $e) {
     die('Database Connection Error: ' . htmlspecialchars($e->getMessage()));
 }
 
+/* =========   PASSWORD CHECK for PASSWORDS   ========= */
+function verifyAndUpgradePassword(PDO $pdo, string $table, string $idCol, string $id, string $typed, string $stored): bool {
+    if (password_verify($typed, $stored)) {
+        return true;
+    }
+    // Old accounts saved before hashing was added: accept once, then re-save as a hash.
+    $isOldPlainText = (password_get_info($stored)['algo'] ?? null) === null;
+    if ($isOldPlainText && hash_equals($stored, $typed)) {
+        $upgrade = $pdo->prepare("UPDATE {$table} SET password_hash = :h WHERE {$idCol} = :id");
+        $upgrade->execute([':h' => password_hash($typed, PASSWORD_DEFAULT), ':id' => $id]);
+        return true;
+    }
+    return false;
+}
 
 /* =========   SHARED VIEW VARIABLES FOR LOGIN & REGISTER  ========== */
 $statusMessage         = '';
@@ -54,8 +71,32 @@ $gateRiderNote  = '';
 
 $currentPageName = strtolower(basename($_SERVER['PHP_SELF'] ?? ''));
 
+/* =========   FETCH LIVE 5-GAL REFILL & NEW CONTAINER PRICES FOR LOGIN/REGISTER SIDEBAR  ========== */
+$loginRefillPrice = 'P30.00';
+$loginNewPrice    = 'P250.00';
+try {
+    $rateRow = $pdo->query("
+        SELECT refill_price, new_container_price
+        FROM container_product
+        WHERE product_id = 'PRD-01'
+        LIMIT 1
+    ")->fetch() ?: $pdo->query("
+        SELECT refill_price, new_container_price
+        FROM container_product
+        ORDER BY product_id ASC
+        LIMIT 1
+    ")->fetch();
+
+    if ($rateRow) {
+        $loginRefillPrice = 'P' . number_format((float)$rateRow['refill_price'], 2);
+        $loginNewPrice    = 'P' . number_format((float)$rateRow['new_container_price'], 2);
+    }
+} catch (Throwable $e) {
+    // Fallback to P30.00 and P250.00 if table is not yet loaded
+}
+
 /* =============================
-   1. LOGIN PAGE(Login.php)
+   1. LOGIN PAGE (Login.php)
 ================================= */
 if (isset($_GET['logout'])) {
     $_SESSION = [];
@@ -82,6 +123,11 @@ if (isset($_GET['registered']) && $_GET['registered'] !== '') {
     $statusType         = $loginStatusType;
 }
 
+/* =========   CSRF: created AFTER the logout/inactive session reset above   ========= */
+majesticCsrfCheck();
+$csrfToken    = majesticCsrfToken();
+$majesticCsrf = $csrfToken;
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login_identifier'], $_POST['password'])) {
     $enteredIdentifier = trim((string)$_POST['login_identifier']);
     $password          = trim((string)$_POST['password']);
@@ -107,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login_identifier'], $
         ]);
         $emp = $stmtEmp->fetch();
 
-        if ($emp && (password_verify($password, (string)$emp['password_hash']) || $password === (string)$emp['password_hash'])) {
+        if ($emp && verifyAndUpgradePassword($pdo, 'employee', 'employee_id', (string)$emp['employee_id'], $password, (string)$emp['password_hash'])) {
             if ((string)$emp['emp_status'] !== 'Active') {
                 $loginStatusMessage = 'Account Inactive: This staff account (' . htmlspecialchars((string)$emp['employee_id']) . ') is currently deactivated. Please contact the station administrator.';
                 $loginStatusType    = 'error';
@@ -156,7 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login_identifier'], $
             ]);
             $cust = $stmtCust->fetch();
 
-            if ($cust && (password_verify($password, (string)$cust['password_hash']) || $password === (string)$cust['password_hash'])) {
+            if ($cust && verifyAndUpgradePassword($pdo, 'customer', 'customer_id', (string)$cust['customer_id'], $password, (string)$cust['password_hash'])) {
                 if ((string)$cust['cust_status'] !== 'Active') {
                     $loginStatusMessage = 'Account Inactive: Your customer account (' . htmlspecialchars((string)$cust['customer_id']) . ') is currently deactivated. Please contact Majestic Spring Water Station.';
                     $loginStatusType    = 'error';
@@ -230,7 +276,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['first_name'], $_POST[
     $gateRiderNote   = trim((string)($_POST['gate_rider_note'] ?? ''));
 
     // Validate required fields and formats
-
     if (
         $firstName === '' || $lastName === '' || $containerLabel === '' ||
         $houseNo === '' || $streetName === '' || $barangay === '' ||
@@ -291,7 +336,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['first_name'], $_POST[
                     }
                 }
                 $newCustomerId = sprintf('CUS-%04d', $maxNum + 1);
-                $passwordHash  = $password;
+                $passwordHash  = password_hash($password, PASSWORD_DEFAULT);
 
                 $insertCustomer = $pdo->prepare("
                     INSERT INTO customer (
@@ -346,12 +391,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['first_name'], $_POST[
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                $registerStatusMessage = 'Database Error: Unable to register customer account (' . $e->getMessage() . ').';
+                error_log('WCDMS register error: ' . $e->getMessage());
+                $registerStatusMessage = 'Database Error: Unable to register your account right now. Please try again.';
                 $registerStatusType    = 'error';
             }
         }
     }
     $statusMessage = $registerStatusMessage;
     $statusType    = $registerStatusType;
+}
+
+// Automatically replace hardcoded P30.00 and P250.00 in Login.php and Register.php with live database prices
+if (in_array($currentPageName, ['login.php', 'register.php'], true)) {
+    ob_start(function (string $html) use ($loginRefillPrice, $loginNewPrice, $majesticCsrf): string {
+        $html = majesticCsrfInject($html, $majesticCsrf);
+        $html = preg_replace('/>\s*P30\.00\s*</i', '>' . $loginRefillPrice . '<', $html);
+        $html = preg_replace('/>\s*P250\.00\s*</i', '>' . $loginNewPrice . '<', $html);
+        return $html;
+    });
 }
 ?>

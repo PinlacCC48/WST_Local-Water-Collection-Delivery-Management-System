@@ -25,11 +25,39 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
     ]);
+    $pdo->exec("SET time_zone = '+08:00'");
 } catch (PDOException $e) {
     die('Database Connection Error: ' . htmlspecialchars($e->getMessage()));
 }
 
 $currentPageName = strtolower(basename($_SERVER['PHP_SELF'] ?? ''));
+
+/* =========   ADMIN / STAFF AUTHENTICATION GUARD   ========= */
+$loggedInEmpId = (string)($_SESSION['user']['employee_id'] ?? $_SESSION['employee_id'] ?? '');
+$empAuthRow = null;
+if ($loggedInEmpId !== '') {
+    $empAuthStmt = $pdo->prepare("SELECT employee_id, emp_status FROM employee WHERE employee_id = :eid LIMIT 1");
+    $empAuthStmt->execute([':eid' => $loggedInEmpId]);
+    $empAuthRow = $empAuthStmt->fetch();
+}
+if (!$empAuthRow) {
+    header('Location: Login.php');
+    exit;
+}
+if (strcasecmp((string)$empAuthRow['emp_status'], 'Inactive') === 0) {
+    $_SESSION = [];
+    session_destroy();
+    header('Location: Login.php?inactive=1');
+    exit;
+}
+
+/* =========   CSRF PROTECTION (all POST forms on these pages)   ========= */
+require_once __DIR__ . '/csrf_helper.php';
+majesticCsrfCheck();
+$majesticCsrf = majesticCsrfToken();
+if (!isset($_GET['ajax_batch']) && !isset($_GET['ajax_records'])) {
+    ob_start(static fn(string $html): string => majesticCsrfInject($html, $majesticCsrf));
+}
 
 /* ====================================================================
    Generate next PRIMARY KEY ID (CUS-000, ORD-000, PAY-0000)
@@ -221,7 +249,7 @@ function resolveOrCreateBatchCustomer(
             ':street' => $stName,
             ':brgy'   => $barangayFormatted,
             ':email'  => $autoEmail,
-            ':phash'  => 'customer123',
+            ':phash'  => password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT),
             ':gate'   => $notes !== '' ? $notes : null
         ]);
     } else {
@@ -373,7 +401,7 @@ if ($currentPageName === 'batch_orders.php') {
         $slotId          = max(1, min(5, (int)($_POST['slot_id'] ?? 1)));
         $riderId         = trim((string)($_POST['rider_id'] ?? ''));
         $inspectionRaw   = trim((string)($_POST['inspection_status'] ?? 'Good'));
-        $productChoice   = trim((string)($_POST['product_id'] ?? 'PID-2'));
+        $productChoice   = trim((string)($_POST['product_id'] ?? 'REFILL|PRD-01'));
         $quantity        = max(1, min(100, (int)($_POST['quantity'] ?? 1)));
         $manualTotalRaw  = trim((string)($_POST['manual_total_price'] ?? ''));
         $delayNotice     = trim((string)($_POST['delay_hold_notice'] ?? 'None'));
@@ -411,7 +439,8 @@ if ($currentPageName === 'batch_orders.php') {
                 header('Location: Batch_Orders.php?slot=' . $targetSlotId . '&slot_updated=' . $targetSlotId);
                 exit;
             } catch (Throwable $e) {
-                $batchStatusMessage = 'Database Error: ' . $e->getMessage();
+                error_log('WCDMS error: ' . $e->getMessage());
+                $batchStatusMessage = 'Database Error: Unable to save your changes right now. Please try again.';
                 $batchStatusType    = 'error';
             }
         }
@@ -469,7 +498,8 @@ if ($currentPageName === 'batch_orders.php') {
                     if ($pdo->inTransaction()) {
                         $pdo->rollBack();
                     }
-                    $batchStatusMessage = 'Database Error: ' . $e->getMessage();
+                    error_log('WCDMS error: ' . $e->getMessage());
+                    $batchStatusMessage = 'Database Error: Unable to save your changes right now. Please try again.';
                     $batchStatusType    = 'error';
                 }
             }
@@ -513,7 +543,8 @@ if ($currentPageName === 'batch_orders.php') {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                $batchStatusMessage = 'Database Error: ' . $e->getMessage();
+                error_log('WCDMS error: ' . $e->getMessage());
+                $batchStatusMessage = 'Database Error: Unable to save your changes right now. Please try again.';
                 $batchStatusType    = 'error';
             }
         }
@@ -561,7 +592,8 @@ if ($currentPageName === 'batch_orders.php') {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                $batchStatusMessage = 'Database Error: ' . $e->getMessage();
+                error_log('WCDMS error: ' . $e->getMessage());
+                $batchStatusMessage = 'Database Error: Unable to save your changes right now. Please try again.';
                 $batchStatusType    = 'error';
             }
         }
@@ -663,144 +695,144 @@ if ($currentPageName === 'batch_orders.php') {
                     $batchStatusMessage = "Batch Capacity Exceeded: Batch {$slotId} only has {$remaining} container slot(s) remaining (Max {$maxCap}).";
                     $batchStatusType    = 'error';
                 } else {
-                try {
-                    $pdo->beginTransaction();
+                    try {
+                        $pdo->beginTransaction();
 
-                    $resolvedCustId = resolveOrCreateBatchCustomer(
-                        $pdo,
-                        $customerId,
-                        $customerName,
-                        $containerLabel,
-                        $address,
-                        $barangayRaw,
-                        $cellphone,
-                        $backupPhone,
-                        $additionalNotes
-                    );
+                        $resolvedCustId = resolveOrCreateBatchCustomer(
+                            $pdo,
+                            $customerId,
+                            $customerName,
+                            $containerLabel,
+                            $address,
+                            $barangayRaw,
+                            $cellphone,
+                            $backupPhone,
+                            $additionalNotes
+                        );
 
-                    $resolvedEmpId = null;
-                    if ($riderId !== '') {
-                        $eChk = $pdo->prepare("SELECT employee_id FROM employee WHERE employee_id = :eid LIMIT 1");
-                        $eChk->execute([':eid' => $riderId]);
-                        if ($eChk->fetch()) {
-                            $resolvedEmpId = $riderId;
+                        $resolvedEmpId = null;
+                        if ($riderId !== '') {
+                            $eChk = $pdo->prepare("SELECT employee_id FROM employee WHERE employee_id = :eid LIMIT 1");
+                            $eChk->execute([':eid' => $riderId]);
+                            if ($eChk->fetch()) {
+                                $resolvedEmpId = $riderId;
+                            }
                         }
-                    }
-                    if ($resolvedEmpId === null) {
-                        $firstEmp = $pdo->query("SELECT employee_id FROM employee ORDER BY employee_id ASC LIMIT 1")->fetch();
-                        if ($firstEmp) {
-                            $resolvedEmpId = (string)$firstEmp['employee_id'];
+                        if ($resolvedEmpId === null) {
+                            $firstEmp = $pdo->query("SELECT employee_id FROM employee ORDER BY employee_id ASC LIMIT 1")->fetch();
+                            if ($firstEmp) {
+                                $resolvedEmpId = (string)$firstEmp['employee_id'];
+                            }
                         }
-                    }
 
-                    if ($isNewOrder) {
-                        $targetOrderId = getNextFormattedId($pdo, 'order_information', 'order_id', 'ORD-');
+                        if ($isNewOrder) {
+                            $targetOrderId = getNextFormattedId($pdo, 'order_information', 'order_id', 'ORD-');
 
-                        $insOrd = $pdo->prepare("
-                            INSERT INTO order_information (
-                                order_id, customer_id, employee_id, slot_id, status_id,
-                                order_channel, service_mode, inspection_status,
-                                delay_hold_notice, additional_notes, total_price, date_ordered
+                            $insOrd = $pdo->prepare("
+                                INSERT INTO order_information (
+                                    order_id, customer_id, employee_id, slot_id, status_id,
+                                    order_channel, service_mode, inspection_status,
+                                    delay_hold_notice, additional_notes, total_price, date_ordered
+                                ) VALUES (
+                                    :oid, :cid, :eid, :sid, :stid,
+                                    'User/Admin Encoded', :smode, :insp,
+                                    :delay, :notes, :tprice, CURRENT_TIMESTAMP
+                                )
+                            ");
+                            $insOrd->execute([
+                                ':oid'    => $targetOrderId,
+                                ':cid'    => $resolvedCustId,
+                                ':eid'    => $resolvedEmpId,
+                                ':sid'    => $slotId,
+                                ':stid'   => $statusId,
+                                ':smode'  => $serviceMode,
+                                ':insp'   => $inspectionStatus,
+                                ':delay'  => $delayNotice ?: 'None',
+                                ':notes'  => $additionalNotes !== '' ? $additionalNotes : null,
+                                ':tprice' => $totalPrice
+                            ]);
+                        } else {
+                            $targetOrderId = $orderId;
+
+                            $updOrd = $pdo->prepare("
+                                UPDATE order_information
+                                SET customer_id = :cid,
+                                    employee_id = :eid,
+                                    slot_id = :sid,
+                                    status_id = :stid,
+                                    service_mode = :smode,
+                                    inspection_status = :insp,
+                                    delay_hold_notice = :delay,
+                                    additional_notes = :notes,
+                                    total_price = :tprice
+                                WHERE order_id = :oid
+                            ");
+                            $updOrd->execute([
+                                ':cid'    => $resolvedCustId,
+                                ':eid'    => $resolvedEmpId,
+                                ':sid'    => $slotId,
+                                ':stid'   => $statusId,
+                                ':smode'  => $serviceMode,
+                                ':insp'   => $inspectionStatus,
+                                ':delay'  => $delayNotice ?: 'None',
+                                ':notes'  => $additionalNotes !== '' ? $additionalNotes : null,
+                                ':tprice' => $totalPrice,
+                                ':oid'    => $targetOrderId
+                            ]);
+
+                            $pdo->prepare("DELETE FROM order_item WHERE order_id = :oid")->execute([':oid' => $targetOrderId]);
+                        }
+
+                        // order_item insertion for both new and updated orders
+                        $insItem = $pdo->prepare("
+                            INSERT INTO order_item (
+                                order_id, product_id, order_type,
+                                unit_price, quantity, subtotal
                             ) VALUES (
-                                :oid, :cid, :eid, :sid, :stid,
-                                'User/Admin Encoded', :smode, :insp,
-                                :delay, :notes, :tprice, CURRENT_TIMESTAMP
+                                :oid, :pid, :otype,
+                                :uprice, :qty, :sub
                             )
                         ");
-                        $insOrd->execute([
+                        $insItem->execute([
                             ':oid'    => $targetOrderId,
-                            ':cid'    => $resolvedCustId,
-                            ':eid'    => $resolvedEmpId,
-                            ':sid'    => $slotId,
-                            ':stid'   => $statusId,
-                            ':smode'  => $serviceMode,
-                            ':insp'   => $inspectionStatus,
-                            ':delay'  => $delayNotice ?: 'None',
-                            ':notes'  => $additionalNotes !== '' ? $additionalNotes : null,
-                            ':tprice' => $totalPrice
-                        ]);
-                    } else {
-                        $targetOrderId = $orderId;
-
-                        $updOrd = $pdo->prepare("
-                            UPDATE order_information
-                            SET customer_id = :cid,
-                                employee_id = :eid,
-                                slot_id = :sid,
-                                status_id = :stid,
-                                service_mode = :smode,
-                                inspection_status = :insp,
-                                delay_hold_notice = :delay,
-                                additional_notes = :notes,
-                                total_price = :tprice
-                            WHERE order_id = :oid
-                        ");
-                        $updOrd->execute([
-                            ':cid'    => $resolvedCustId,
-                            ':eid'    => $resolvedEmpId,
-                            ':sid'    => $slotId,
-                            ':stid'   => $statusId,
-                            ':smode'  => $serviceMode,
-                            ':insp'   => $inspectionStatus,
-                            ':delay'  => $delayNotice ?: 'None',
-                            ':notes'  => $additionalNotes !== '' ? $additionalNotes : null,
-                            ':tprice' => $totalPrice,
-                            ':oid'    => $targetOrderId
+                            ':pid'    => $productId,
+                            ':otype'  => $orderType,
+                            ':uprice' => $unitPrice,
+                            ':qty'    => $quantity,
+                            ':sub'    => $subtotal
                         ]);
 
-                        $pdo->prepare("DELETE FROM order_item WHERE order_id = :oid")->execute([':oid' => $targetOrderId]);
+                        syncOrderPaymentRecord(
+                            $pdo,
+                            $targetOrderId,
+                            $statusId,
+                            $isUnpaidUtang,
+                            $totalPrice,
+                            $currentActor,
+                            $additionalNotes
+                        );
+
+                        $pdo->commit();
+                        header('Location: Batch_Orders.php?slot=' . $slotId . '&saved=' . urlencode($targetOrderId));
+                        exit;
+                    } catch (Throwable $e) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        error_log('WCDMS error: ' . $e->getMessage());
+                        $batchStatusMessage = 'Database Error: Unable to save your changes right now. Please try again.';
+                        $batchStatusType    = 'error';
                     }
-
-                    //order_item insertion for both new and updated orders
-                    $insItem = $pdo->prepare("
-                        INSERT INTO order_item (
-                            order_id, product_id, order_type,
-                            unit_price, quantity, subtotal
-                        ) VALUES (
-                            :oid, :pid, :otype,
-                            :uprice, :qty, :sub
-                        )
-                    ");
-                    $insItem->execute([
-                        ':oid'    => $targetOrderId,
-                        ':pid'    => $productId,
-                        ':otype'  => $orderType,
-                        ':uprice' => $unitPrice,
-                        ':qty'    => $quantity,
-                        ':sub'    => $subtotal
-                    ]);
-
-                    syncOrderPaymentRecord(
-                        $pdo,
-                        $targetOrderId,
-                        $statusId,
-                        $isUnpaidUtang,
-                        $totalPrice,
-                        $currentActor,
-                        $additionalNotes
-                    );
-
-                    $pdo->commit();
-                    header('Location: Batch_Orders.php?slot=' . $slotId . '&saved=' . urlencode($targetOrderId));
-                    exit;
-                } catch (Throwable $e) {
-                    if ($pdo->inTransaction()) {
-                        $pdo->rollBack();
-                    }
-                    $batchStatusMessage = 'Database Error: ' . $e->getMessage();
-                    $batchStatusType    = 'error';
-                }
                 }
             }
         }
     }
 
-    // Query Slots (Counting Active Queued/In-Progress Containers where status_id NOT IN (5 = delivered/paid, 7 = cancelled))
-    // & Prioritized Batch Orders (Priority Walk-In first, then Rescheduled, then Standard)
+    // Query Slots & Prioritized Batch Orders
     $nowTime   = date('H:i:s');
     $phonesMap = getCustomerPhonesMap($pdo);
 
-// Auto-sync slot_status 
+    // Auto-sync slot_status
     $syncSlotsStmt = $pdo->prepare("
         UPDATE time_slot ts
         LEFT JOIN (
@@ -903,11 +935,16 @@ if ($currentPageName === 'batch_orders.php') {
 
         $qty        = (int)($row['quantity'] ?? 1);
         $totalPrice = (float)$row['total_price'];
-        $cTypeLabel = ($oType === 'Other') ? 'Other' : (string)($row['container_type'] ?? '5-Gal - Slim');
-        $stId       = (int)$row['status_id'];
-        $delayHold  = (string)($row['delay_hold_notice'] ?? 'None');
-        $payStat    = (string)($row['payment_status'] ?? '');
-        $normMode   = normalizeStationServiceMode((string)$row['service_mode']);
+
+        // Display Full Container Name | Total in Gallon - Price column
+        $fullContainerName = ($oType === 'Other')
+            ? 'Other'
+            : (string)(!empty($row['container_name']) ? $row['container_name'] : ($row['container_type'] ?? '5-Gallon Container'));
+
+        $stId      = (int)$row['status_id'];
+        $delayHold = (string)($row['delay_hold_notice'] ?? 'None');
+        $payStat   = (string)($row['payment_status'] ?? '');
+        $normMode  = normalizeStationServiceMode((string)$row['service_mode']);
 
         $isUtangOrder = (
             stripos($delayHold, 'Utang') !== false ||
@@ -946,7 +983,7 @@ if ($currentPageName === 'batch_orders.php') {
             'barangay_num'           => $brgyNum,
             'address_only'           => $row['house_no'] . ' ' . $row['street_name'] . ', ' . $row['city'],
             'brgy_address_cell'      => 'Brgy ' . $brgyNum . ' - ' . $row['house_no'] . ' ' . $row['street_name'] . ', ' . $row['city'],
-            'gallon_price_cell'      => ($qty > 1 ? "{$qty}x " : '') . $cTypeLabel . ' | P' . number_format($totalPrice, 2),
+            'gallon_price_cell'      => ($qty > 1 ? "{$qty}x " : '') . $fullContainerName . ' | P' . number_format($totalPrice, 2),
             'product_select'         => $selectProductVal,
             'quantity'               => $qty,
             'total_price'            => number_format($totalPrice, 2, '.', '')
@@ -962,7 +999,7 @@ if ($currentPageName === 'batch_orders.php') {
         $selectedSlotParam = (int)$batchOrdersList[0]['slot_id'];
     }
 
-    // FETCH API for Live Batch Queue & Slot Counters 
+    // FETCH API for Live Batch Queue & Slot Counters
     if (isset($_GET['ajax_batch']) && $_GET['ajax_batch'] === '1') {
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode([
@@ -988,7 +1025,7 @@ if ($currentPageName === 'batch_orders.php') {
             'message' => $batchStatusMessage,
             'type'    => $batchStatusType
         ]
-    ], JSON_UNESCAPED_UNICODE) . ";\n";
+    ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) . ";\n";
     echo "</script>\n";
 }
 
@@ -1007,7 +1044,7 @@ if ($currentPageName === 'order_records.php') {
     } elseif (isset($_GET['deleted']) && $_GET['deleted'] !== '') {
         $recordStatusMessage = 'Order Record ' . htmlspecialchars((string)$_GET['deleted']) . ' deleted successfully.';
         $recordStatusType    = 'success';
-    }
+    }}
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $formAction         = trim((string)($_POST['form_action'] ?? 'save'));
@@ -1017,7 +1054,7 @@ if ($currentPageName === 'order_records.php') {
         $statusRaw          = trim((string)($_POST['status_id'] ?? '5'));
         $serviceModeRaw     = trim((string)($_POST['service_mode'] ?? 'Pickup/Delivery'));
         $orderChannelRaw    = trim((string)($_POST['order_channel'] ?? 'User/Admin Encoded'));
-        $productOrderText   = trim((string)($_POST['product_order'] ?? '5-Gal - Slim Refill'));
+        $productOrderText   = trim((string)($_POST['product_order'] ?? 'REFILL|PRD-01'));
         $quantityInput      = max(1, (int)($_POST['quantity'] ?? 1));
         $batchSlotText      = trim((string)($_POST['batch_slot'] ?? '1'));
         $customerName       = trim((string)($_POST['customer_name'] ?? ''));
@@ -1050,12 +1087,13 @@ if ($currentPageName === 'order_records.php') {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                $recordStatusMessage = 'Database Error: ' . $e->getMessage();
+                error_log('WCDMS error: ' . $e->getMessage());
+                $recordStatusMessage = 'Database Error: Unable to save your changes right now. Please try again.';
                 $recordStatusType    = 'error';
             }
         }
 
-        //  SAVE (ENCODE NEW OR UPDATE EXISTING) ORDER RECORD & CASH PAYMENT LOG
+        // SAVE (ENCODE NEW OR UPDATE EXISTING) ORDER RECORD & CASH PAYMENT LOG
         if ($formAction === 'save') {
             if ($customerName === '' || $address === '' || $cellphone === '' || $productOrderText === '') {
                 $recordStatusMessage = 'Incomplete Form: Please fill out Order Type, Quantity, Customer Name, Address, and Cellphone #.';
@@ -1088,16 +1126,32 @@ if ($currentPageName === 'order_records.php') {
                     $qty = max(1, (int)$qm[1]);
                 }
 
-                $productId = (stripos($productOrderText, 'Round') !== false) ? 'PRD-02' : 'PRD-01';
-                if (strcasecmp(trim($productOrderText), 'Other') === 0) {
+                // Resolve product_id and order_type from dynamic <MODE>|<PRODUCT_ID> or fallback text
+                if (strcasecmp(trim($productOrderText), 'OTHER') === 0 || strcasecmp(trim($productOrderText), 'Other') === 0) {
+                    $firstProd = $pdo->query("SELECT product_id FROM container_product ORDER BY product_id ASC LIMIT 1")->fetchColumn();
+                    $productId = $firstProd ? (string)$firstProd : 'PRD-01';
                     $orderType = 'Other';
-                } elseif (stripos($productOrderText, 'New') !== false && stripos($productOrderText, 'Refill') !== false) {
-                    $orderType = 'New Container + Refill';
-                } elseif (stripos($productOrderText, 'New') !== false) {
-                    $orderType = 'New Container Only';
+                } elseif (strpos($productOrderText, '|') !== false) {
+                    [$modeCode, $productId] = explode('|', $productOrderText, 2);
+                    $orderType = ($modeCode === 'NEW')
+                        ? 'New Container Only'
+                        : (($modeCode === 'NEW-REFILL') ? 'New Container + Refill' : 'Refill Only');
                 } else {
-                    $orderType = 'Refill Only';
+                    $productId = (stripos($productOrderText, 'Round') !== false) ? 'PRD-02' : 'PRD-01';
+                    if (stripos($productOrderText, 'New') !== false && stripos($productOrderText, 'Refill') !== false) {
+                        $orderType = 'New Container + Refill';
+                    } elseif (stripos($productOrderText, 'New') !== false) {
+                        $orderType = 'New Container Only';
+                    } else {
+                        $orderType = 'Refill Only';
+                    }
                 }
+
+                $pStmt = $pdo->prepare("SELECT refill_price, new_container_price FROM container_product WHERE product_id = :pid LIMIT 1");
+                $pStmt->execute([':pid' => $productId]);
+                $prodRow    = $pStmt->fetch();
+                $refillRate = $prodRow ? (float)$prodRow['refill_price'] : 30.00;
+                $newRate    = $prodRow ? (float)$prodRow['new_container_price'] : 250.00;
 
                 $isStatusUtang = ($statusRaw === '5_UNPAID');
                 $statusId      = $isStatusUtang ? 5 : max(1, min(7, (int)$statusRaw));
@@ -1114,7 +1168,9 @@ if ($currentPageName === 'order_records.php') {
                     ? 'Unpaid / Utang'
                     : 'None';
 
-                $defaultUnit = ($orderType === 'New Container Only') ? 250.00 : (($orderType === 'New Container + Refill') ? 280.00 : 30.00);
+                $defaultUnit = ($orderType === 'New Container Only')
+                    ? $newRate
+                    : (($orderType === 'New Container + Refill') ? ($newRate + $refillRate) : $refillRate);
                 $cleanedAmount = (float)preg_replace('/[^0-9.]/', '', $totalPaidRaw);
                 if ($cleanedAmount <= 0) {
                     $cleanedAmount = $defaultUnit * $qty;
@@ -1210,7 +1266,7 @@ if ($currentPageName === 'order_records.php') {
                         $pdo->prepare("DELETE FROM order_item WHERE order_id = :oid")->execute([':oid' => $targetOrderId]);
                     }
 
-                    // order_item insertion
+                    // Unified order_item insertion
                     $insItem = $pdo->prepare("
                         INSERT INTO order_item (
                             order_id, product_id, order_type,
@@ -1280,7 +1336,8 @@ if ($currentPageName === 'order_records.php') {
                     if ($pdo->inTransaction()) {
                         $pdo->rollBack();
                     }
-                    $recordStatusMessage = 'Database Error: ' . $e->getMessage();
+                    error_log('WCDMS error: ' . $e->getMessage());
+                    $recordStatusMessage = 'Database Error: Unable to save your changes right now. Please try again.';
                     $recordStatusType    = 'error';
                 }
             }
@@ -1307,6 +1364,7 @@ if ($currentPageName === 'order_records.php') {
                oi.quantity,
                oi.subtotal,
                cp.container_type,
+               cp.container_name,
                p.payment_id,
                p.total_paid,
                p.recorded_by,
@@ -1332,18 +1390,26 @@ if ($currentPageName === 'order_records.php') {
 
         $brgyNum = preg_replace('/[^0-9]/', '', (string)$r['barangay']) ?: (string)$r['barangay'];
         $qty     = (int)($r['quantity'] ?? 1);
-        $cType   = (string)($r['container_type'] ?? '5-Gal - Slim');
+        $pId     = (string)($r['product_id'] ?? 'PRD-01');
         $oType   = (string)($r['order_type'] ?? 'Refill Only');
+        $fullContainerName = ($oType === 'Other')
+            ? 'Other'
+            : (string)(!empty($r['container_name']) ? $r['container_name'] : ($r['container_type'] ?? '5-Gal - Slim'));
+
         if ($oType === 'Other') {
-            $baseItem = 'Other';
+            $selectProductVal = 'OTHER';
+            $baseItem         = 'Other';
         } elseif ($oType === 'New Container + Refill') {
-            $baseItem = "New {$cType} + Refill";
+            $selectProductVal = "NEW-REFILL|{$pId}";
+            $baseItem         = "{$fullContainerName} (New + Refill)";
         } elseif ($oType === 'New Container Only') {
-            $baseItem = "New {$cType}";
+            $selectProductVal = "NEW|{$pId}";
+            $baseItem         = "{$fullContainerName} (New Container)";
         } else {
-            $baseItem = "{$cType} Refill";
+            $selectProductVal = "REFILL|{$pId}";
+            $baseItem         = "{$fullContainerName} (Refill)";
         }
-        $shortItem = ($qty > 1) ? "{$qty}x {$baseItem}" : $baseItem;
+        $shortItem = ($qty > 1) ? "{$qty}x {$fullContainerName}" : $fullContainerName;
 
         $stId      = (int)$r['status_id'];
         $delayHold = (string)($r['delay_hold_notice'] ?? 'None');
@@ -1390,6 +1456,7 @@ if ($currentPageName === 'order_records.php') {
             'status_name'           => $isUtangOrder ? 'Delivered (Unpaid / Utang)' : (string)$r['status_name'],
             'is_utang'              => $isUtangOrder,
             'delay_hold_notice'     => $delayHold,
+            'product_select'        => $selectProductVal,
             'base_order_type'       => $baseItem,
             'order_summary'         => $shortItem,
             'quantity'              => $qty,
@@ -1405,12 +1472,13 @@ if ($currentPageName === 'order_records.php') {
     }
 
     $customersLookup = getActiveCustomersLookup($pdo, $phonesMap);
+    $productsList    = $pdo->query("SELECT product_id, container_name, container_type, refill_price, new_container_price, availability_status FROM container_product ORDER BY product_id ASC")->fetchAll();
 
     $initialDate = isset($_GET['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$_GET['date'])
         ? (string)$_GET['date']
         : date('Y-m-d');
-    
-        // FETCH API for Live Order Records & Cash Audit Log 
+
+    // FETCH API for Live Order Records & Cash Audit Log
     if (isset($_GET['ajax_records']) && $_GET['ajax_records'] === '1') {
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode([
@@ -1418,6 +1486,7 @@ if ($currentPageName === 'order_records.php') {
             'available_dates' => $availableDates,
             'records'         => $orderRecordsList,
             'customers'       => $customersLookup,
+            'products'        => $productsList,
         ], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -1431,10 +1500,10 @@ if ($currentPageName === 'order_records.php') {
         'available_dates'    => $availableDates,
         'records'            => $orderRecordsList,
         'customers'          => $customersLookup,
+        'products'           => $productsList,
         'flash'              => [
             'message' => $recordStatusMessage,
             'type'    => $recordStatusType
         ]
-    ], JSON_UNESCAPED_UNICODE) . ";\n";
+    ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) . ";\n";
     echo "</script>\n";
-}
