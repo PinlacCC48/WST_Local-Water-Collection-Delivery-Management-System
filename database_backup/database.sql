@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Nov 13, 2026 at 07:18 AM
+-- Generation Time: Nov 15, 2026 at 08:34 AM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.0.30
 
@@ -30,7 +30,7 @@ SET time_zone = "+00:00";
 CREATE TABLE `container_product` (
   `product_id` varchar(15) NOT NULL,
   `container_name` varchar(100) NOT NULL,
-  `container_type` varchar(50) NOT NULL,
+  `container_type` varchar(50) NOT NULL DEFAULT '5-Gal - Slim',
   `capacity_gallons` int(11) NOT NULL DEFAULT 5,
   `refill_price` decimal(10,2) NOT NULL DEFAULT 30.00,
   `new_container_price` decimal(10,2) NOT NULL DEFAULT 250.00,
@@ -69,6 +69,15 @@ CREATE TABLE `customer` (
   `cust_status` enum('Active','Inactive') NOT NULL DEFAULT 'Active'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+--
+-- Dumping data for table `customer`
+--
+
+INSERT INTO `customer` (`customer_id`, `first_name`, `last_name`, `container_label`, `house_no`, `street_name`, `barangay`, `city`, `email_address`, `password_hash`, `gate_rider_note`, `date_registered`, `cust_status`) VALUES
+('CUS-0001', 'Clark', 'Pinlac', 'Bautista', '209', 'Laon-laan Street', 'Barangay 24', 'Caloocan City', 'clarkpinlac28@gmail.com', '$2y$10$7ww4wIwSbZoM3mqAeooLP.L1CP4dCyLZkj9LqLaWTXQEMVN1MI5KW', 'Leave with guard at front gate if out', '2026-11-08', 'Active'),
+('CUS-0002', 'Maricel', 'Dela Cruz', 'DelaCruz', '14', 'Dimasalang Street', 'Barangay 22', 'Caloocan City', 'maricel.delacruz@gmail.com', '$2y$10$abcdefghijklmnopqrstuuzODQUGMBrN0lNFsQUfWvYdS884xxG02', 'Ring doorbell twice, green gate', '2026-11-10', 'Active'),
+('CUS-0014', 'Clark', 'Louise C. Pinlac', 'Clark', '128', 'Dimasalang Street', 'Barangay 22', 'Caloocan City', 'customer@gmail.com', '$2y$10$JFxWGsxAlguoousC1tfyXebCbj1ZhgwsPqLagvVOnoidppvtH7sn2', NULL, '2026-11-13', 'Active');
+
 -- --------------------------------------------------------
 
 --
@@ -80,6 +89,16 @@ CREATE TABLE `customer_cp_num` (
   `cp_num` varchar(20) NOT NULL,
   `cp_type` enum('Primary','Backup') NOT NULL DEFAULT 'Primary'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Dumping data for table `customer_cp_num`
+--
+
+INSERT INTO `customer_cp_num` (`customer_id`, `cp_num`, `cp_type`) VALUES
+('CUS-0001', '09173001003', 'Primary'),
+('CUS-0002', '09173001002', 'Primary'),
+('CUS-0002', '09183001002', 'Backup'),
+('CUS-0014', '09678948333', 'Primary');
 
 -- --------------------------------------------------------
 
@@ -108,12 +127,12 @@ CREATE TABLE `employee` (
 --
 
 INSERT INTO `employee` (`employee_id`, `first_name`, `last_name`, `house_no`, `street_name`, `barangay`, `city`, `email_address`, `password_hash`, `emp_role`, `date_hired`, `emp_status`, `manager_id`) VALUES
-('EMP-0001', 'Primary', 'Admin', '1', 'Sample Street', 'Barangay 22', 'Caloocan City', 'admin@majesticspring.test', 'admin12345', 'Admin', '2026-11-08', 'Active', NULL),
+('EMP-0001', 'Primary', 'Admin', '1', 'Sample Street', 'Barangay 22', 'Caloocan City', 'admin@majesticspring.test', '$2y$10$kLLApGFexqaUnE2GrUKN3OpduUIWC8l8EGQzof784t2OTx9dfmrwK', 'Admin', '2026-11-08', 'Active', NULL),
 ('EMP-0003', 'Elena', 'Soriano', '45', 'Rizal Avenue Ext.', 'Barangay 22', 'Caloocan City', 'elena.admin@majesticspring.test', '$2y$10$abcdefghijklmnopqrstuurDHpKIEi2Mvm4OXE7/STNUgDOoXyzMa', 'Admin', '2026-11-10', 'Active', NULL),
 ('EMP-0004', 'Marco', 'Villanueva', '88', 'A. Mabini Street', 'Barangay 24', 'Caloocan City', 'marco.admin@majesticspring.test', '$2y$10$abcdefghijklmnopqrstuurDHpKIEi2Mvm4OXE7/STNUgDOoXyzMa', 'Admin', '2026-11-10', 'Active', NULL),
 ('EMP-0005', 'Boyet', 'Tolentino', '19', 'C. Namie Street', 'Barangay 26', 'Caloocan City', 'boyet.rider@majesticspring.test', '$2y$10$abcdefghijklmnopqrstuurDHpKIEi2Mvm4OXE7/STNUgDOoXyzMa', 'Delivery Rider', '2026-11-10', 'Active', 'EMP-0003'),
 ('EMP-0006', 'Jomar', 'Catacutan', '63', 'P. Burgos Street', 'Barangay 27', 'Caloocan City', 'jomar.rider@majesticspring.test', '$2y$10$abcdefghijklmnopqrstuurDHpKIEi2Mvm4OXE7/STNUgDOoXyzMa', 'Delivery Rider', '2026-11-10', 'Active', 'EMP-0003'),
-('EMP-0007', 'Admin', 'Tester', '123', 'Test Street', 'Barangay 22', 'Caloocan City', 'Admin12345@gmail.com', 'admin12345', 'Admin', '2026-11-11', 'Active', NULL);
+('EMP-0007', 'Admin', 'Tester', '123', 'Test Street', 'Barangay 22', 'Caloocan City', 'Admin12345@gmail.com', '$2y$10$m3YMf83vRKwVabUMUL7XH.y1OwIXgj6/OhVmoHH4JdL/wMT3zJKI2', 'Admin', '2026-11-11', 'Active', NULL);
 
 -- --------------------------------------------------------
 
@@ -161,6 +180,11 @@ CREATE TABLE `order_information` (
   `date_ordered` datetime NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+--
+-- Dumping data for table `order_information`
+--
+
+
 -- --------------------------------------------------------
 
 --
@@ -170,11 +194,16 @@ CREATE TABLE `order_information` (
 CREATE TABLE `order_item` (
   `order_id` varchar(15) NOT NULL,
   `product_id` varchar(15) NOT NULL,
-  `order_type` enum('Refill Only','New Container Only','New Container + Refill','Other') NOT NULL DEFAULT 'Refill Only',
+  `order_type` varchar(50) NOT NULL DEFAULT 'Refill Only',
   `unit_price` decimal(10,2) NOT NULL DEFAULT 30.00,
   `quantity` int(11) NOT NULL DEFAULT 1,
   `subtotal` decimal(10,2) NOT NULL DEFAULT 30.00
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Dumping data for table `order_item`
+--
+
 
 -- --------------------------------------------------------
 
@@ -218,6 +247,11 @@ CREATE TABLE `payment` (
   `date_paid` datetime DEFAULT current_timestamp(),
   `payment_status` enum('Paid','Remitted','Unpaid') NOT NULL DEFAULT 'Unpaid'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Dumping data for table `payment`
+--
+
 
 -- --------------------------------------------------------
 
